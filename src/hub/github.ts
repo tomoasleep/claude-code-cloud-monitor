@@ -47,11 +47,6 @@ export function formatCommentRef(ref: CommentRef): string {
   return `github:${ref.owner}/${ref.repo}/comments/${ref.commentId}`
 }
 
-export function parseRepoFromRemoteUrl(url: string): string | null {
-  const match = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\s*$/.exec(url)
-  return match ? `${match[1]}/${match[2]}` : null
-}
-
 type HttpResponse = { status: number; headers: Record<string, string>; body: string }
 
 function parseHttpResponse(output: string): HttpResponse | null {

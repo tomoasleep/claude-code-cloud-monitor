@@ -94,10 +94,7 @@ describe("e2e", {
       CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01E2ESession000000000000",
     }
 
-    const first = await claude(
-      ["-p", buildPrompt("E2E-TASK fix the bug", { to: to(), addRepo: null })],
-      env,
-    )
+    const first = await claude(["-p", buildPrompt("E2E-TASK fix the bug", to())], env)
     let state = await hubState()
     assert.equal(state.acked_at !== null, true)
     assert.equal(state.session_id, "session_01E2ESession000000000000")

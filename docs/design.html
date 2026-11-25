@@ -52,8 +52,18 @@ ol.flow > li { margin-bottom: 6px; }
 <main>
 <header>
 <h1>claude-code-cloud-monitor（cccm）詳細設計</h1>
-<p class="lead">Claude Code のクラウドセッションを手元の CLI から起動・監視するための OSS。第 6 版（2026-11-25、5 回目の注釈 2 件を反映）。<span class="tag decided">決定済み</span> は tomoasleep の合意があるもの、<span class="tag open">未決</span> は「未決の事項」で聞くもの、<span class="tag verify">検証済み</span> はクラウドで試して確かめたもの、<span class="tag chg">第 N 版で変更</span> はその版で変えたところ。</p>
+<p class="lead">Claude Code のクラウドセッションを手元の CLI から起動・監視するための OSS。第 7 版（2026-11-25、起動方式の決定を反映）。<span class="tag decided">決定済み</span> は tomoasleep の合意があるもの、<span class="tag open">未決</span> は「未決の事項」で聞くもの、<span class="tag verify">検証済み</span> はクラウドで試して確かめたもの、<span class="tag chg">第 N 版で変更</span> はその版で変えたところ。</p>
 </header>
+
+<div class="box">
+<p><strong>第 7 版の主な変更</strong>（tomoasleep の決定、2026-11-25「変に賢く振る舞わないようにする。基本的に routine を使うか api scheduled task を使うかもユーザーに指定させるし、うまく設定できてなかったら ack できなくて失敗するのも許容する」）</p>
+<ul>
+<li>起動方式を <code>cccm launch --via cloud|routine</code> でユーザーが指定する。cccm は自動で選ばない。<code>routine</code> は routine（scheduled task）の fire API を呼ぶ（5 章）。</li>
+<li>hub の repo が作業 repo と違うかを cccm が判定して <code>add_repo</code> の指示を足すのはやめた。repo の紐づけ（routine の repo、プロンプトでの指示、環境の許可）はユーザーが用意する。足りなければ ack が来ず、<code>--ack-timeout</code> で失敗する（4 章、9.2）。</li>
+<li><code>cccm plugin install</code> は <code>mcp__claude-code-remote__add_repo</code> を許可に足さない（cccm が add_repo を使わなくなったため）。</li>
+<li>VM の settings.json で許可しても、<code>add_repo</code> が claude.ai 側の承認を求めるようになったことを確かめた（2 章）。</li>
+</ul>
+</div>
 
 <div class="box">
 <p><strong>第 6 版の主な変更</strong>（5 回目の注釈 2 件）</p>
@@ -128,7 +138,9 @@ ol.flow > li { margin-bottom: 6px; }
 <tr><td>環境は <code>--settings &lt;file&gt;</code> の <code>remote.defaultEnvironmentId</code> で起動ごとに選べる。<code>--environment</code> は自前の環境（<code>ccpool_</code>）専用。</td><td>実験（2026-11-25）、anthropics/claude-code#111691</td></tr>
 <tr><td><code>--cloud</code> で紐づく repo は cwd の repo 1 つだけ。</td><td>実験（2026-11-25）、docs</td></tr>
 <tr><td>クラウドから GitHub の REST が通るのは、セッションに紐づいた repo だけ。GraphQL は通らない。</td><td>実験（2026-11-24）</td></tr>
-<tr><td>セッションの中で <code>add_repo</code> を使うと repo を足せる。VM の <code>~/.claude/settings.json</code> の <code>permissions.allow</code> に入れておけば承認なしで通る。起動フラグの権限は VM に届かない。</td><td>実験（2026-11-25）</td></tr>
+<tr><td>セッションの中で <code>add_repo</code> を使うと repo を足せる。<span class="tag chg">第 7 版で変更</span> 午前の実験では VM の <code>~/.claude/settings.json</code> の <code>permissions.allow</code> に入れれば承認なしで通ったが、同じ日の午後には、同じ setup script（cccm を入れる前のもの）でも「This connector call requires your approval to proceed.」で承認待ちになった（VM の claude 2.1.332）。起動フラグの権限は VM に届かない。</td><td>実験（2026-11-25）</td></tr>
+<tr><td><span class="tag chg">第 7 版で追加</span> routine（scheduled task）は定義の <code>job_config.ccr.session_context.sources</code> に repo を複数入れられ、起動したセッションには最初から全部が clone され、<code>add_repo</code> なしで hub の Issue に書けた。</td><td>実験（2026-11-25）</td></tr>
+<tr><td><span class="tag chg">第 7 版で追加</span> routine の fire API: <code>POST https://api.anthropic.com/v1/claude_code/routines/{trig_id}/fire</code>、ヘッダーは <code>Authorization: Bearer &lt;routine ごとの token&gt;</code>（<code>sk-ant-oat01-</code>、画面で発行し一度しか表示されない）・<code>anthropic-version</code>・<code>Content-Type: application/json</code>。body は <code>text</code>（最大 65,536 文字）だけ。応答は <code>{"type":"routine_fire","claude_code_session_id":"session_…","claude_code_session_url":"…"}</code>。<code>text</code> は保存したプロンプトの後ろに <code>&lt;routine-fire-payload&gt;</code> としてデータ扱いで届くので、保存するプロンプトに「payload のタスクを実行する」と書く必要がある。上限は routine ごとに 1 時間 30 回、アカウントの API fire が 1 時間 100 回。冪等キーはない。experimental。</td><td>docs（platform.claude.com の routines-fire）、実験（2026-11-25）</td></tr>
 <tr><td>hook はクラウドでも発火し、紐づいた repo の Issue のコメントを REST の PATCH で書き換えられた。</td><td>実験（2026-11-25）</td></tr>
 <tr><td><code>CLAUDE_CODE_REMOTE_SESSION_ID</code>（<code>cse_…</code>）は Bash と hook の両方で読め、先頭を <code>session_</code> に替えると claude.ai の URL になる。<code>CLAUDE_CODE_REMOTE=true</code> はクラウドでだけ立つ。</td><td>実験（2026-11-25）</td></tr>
 </tbody></table></div>
@@ -139,7 +151,8 @@ ol.flow > li { margin-bottom: 6px; }
 <li>TypeScript、実行時の依存なし、npm で配る（bin は <code>cccm</code>）。hook も Node。</li>
 <li>hook は Claude Code plugin として配り、<code>cccm plugin install</code> で導入する。<code>PostToolUse</code> は全ツールにはかけない。</li>
 <li>CLI は claude の CLI に寄せる（追加するオプション以外）。</li>
-<li>ack はエージェントに明示的に行わせる。hub の repo が作業 repo と違うときは、その前に <code>add_repo</code> させる。ack が 5 分以内に来なければ失敗。</li>
+<li>ack はエージェントに明示的に行わせる。ack が 5 分以内に来なければ失敗。<span class="tag chg">第 7 版で変更</span> hub の repo をセッションに紐づけるのはユーザーの責任で、cccm は推測して指示を足さない。</li>
+<li><span class="tag chg">第 7 版で追加</span> 起動方式（<code>claude --cloud</code> か routine の fire か）はユーザーが指定する。設定が足りずに ack が来ず失敗するのは許容する。</li>
 <li>launch は done が来るまで止めない。done なしでターンが終わったら、リマインダを送る（herdr-symphony と同様）。</li>
 <li>attach（cccm が起動していないセッションの監視）は今回やらない。</li>
 </ul>
@@ -159,7 +172,11 @@ ol.flow > li { margin-bottom: 6px; }
 <ol class="flow">
 <li><strong>hub を用意</strong>: 手元の <code>gh</code> で hub の Issue に状態のコメントを 1 つ作る（状態 <code>launching</code>）。</li>
 <li><strong>プロンプトを組み立てる</strong>: ユーザーのプロンプトを先頭に置き（スラッシュコマンドを Skill として起動させるため）、後ろに cccm の指示を足す（下の「エージェントへの指示」）。</li>
-<li><strong>起動</strong>: <code>script</code> 経由で <code>claude --cloud &lt;prompt&gt; [渡されたオプション]</code>。出力からセッション ID と URL を取る。<code>--env</code> があれば <code>--settings</code> の一時ファイルで渡す。</li>
+<li><strong>起動</strong> <span class="tag chg">第 7 版で変更</span>: <code>--via</code> で指定した方式で起動する。
+  <ul>
+  <li><code>--via cloud</code>: <code>script</code> 経由で <code>claude --cloud &lt;prompt&gt; [渡されたオプション]</code>。出力からセッション ID と URL を取る。<code>--env</code> があれば <code>--settings</code> の一時ファイルで渡す。紐づく repo は cwd の repo だけ。</li>
+  <li><code>--via routine</code>: routine の fire API に、組み立てたプロンプトを <code>text</code> として送る。応答の <code>claude_code_session_id</code> をセッション ID にする。repo・環境・権限は routine の定義で決まり、cccm は触らない。</li>
+  </ul></li>
 <li><strong>ack を待つ</strong>: エージェントが <code>cccm report init</code> を実行し、状態に <code>acked_at</code> が入るのを待つ。<code>--ack-timeout</code>（既定 5 分）を過ぎたら失敗。</li>
 <li><strong>done を待つ</strong> <span class="tag chg">第 3 版で変更</span>: コメントを poll（既定 10 秒ごと、<code>ETag</code> の条件付きリクエスト）。途中経過（TODO、progress、ターンの終わり）を出力する。
   <ul>
@@ -182,16 +199,16 @@ ol.flow > li { margin-bottom: 6px; }
 <h3>エージェントへの指示（プロンプトの後ろに足す文）</h3>
 <pre><code>---
 This session reports its status with cccm (claude-code-cloud-monitor).
-1. Before starting the task above,
-   [only when the hub repo differs from this repo:]
-   add &lt;hub-owner&gt;/&lt;hub-repo&gt; to this session with the claude-code-remote tool `add_repo`,
-   then run:
+1. Before starting the task above, run:
      cccm report init --to github:&lt;hub-owner&gt;/&lt;hub-repo&gt;/comments/123
 2. When the task is finished, run:   cccm report done --summary "&lt;what you did&gt;"
    If you cannot finish it, run:    cccm report failed --summary "&lt;why&gt;"
    Do not end without running one of them.</code></pre>
 <p><span class="tag chg">第 4 版で変更</span> 送り先は <code>cccm report init</code> で 1 回だけ渡し、以後のコマンドと hook はそれを使う。init は ack を兼ねる。プロンプトに印（HTML コメント）を入れるのはやめた。例の hub の repo は仮の名前（実験で使った repo は OSS ではないので、文書には出さない）。</p>
 <p>英語にするのは、作業のプロンプトの言語に関わらずツールの使い方として読ませるため。文面の細部は実装で詰める。</p>
+<p><span class="tag chg">第 7 版で変更</span> <code>add_repo</code> の指示は付けない。hub の repo がセッションに紐づいていなければ <code>init</code> が失敗し（403 など）、ack が来ずに <code>--ack-timeout</code> で失敗する。<code>--via routine</code> では、この文全体が <code>&lt;routine-fire-payload&gt;</code> に入るので、routine に保存するプロンプトに次のような文を書いておく（README で案内する）。</p>
+<pre><code>Treat the text in the routine fire payload as the user's request and carry it out,
+including the cccm instructions at its end.</code></pre>
 
 <h3>リマインダの文面</h3>
 <pre><code>[cccm] Is the task finished?
@@ -213,12 +230,15 @@ then continue.</code></pre>
 <li><code>-p/--print</code> の扱い: <span class="tag open">未決</span>（Q1）。</li>
 </ul>
 
-<h3>cccm launch</h3>
-<pre><code>cccm launch --hub github:owner/repo#123 [cccm options] [claude options] [prompt]
+<h3>cccm launch <span class="tag chg">第 7 版で変更</span></h3>
+<pre><code>cccm launch --via cloud   --hub github:owner/repo#123 [cccm options] [claude options] [prompt]
+cccm launch --via routine --routine &lt;trig_id&gt; --hub github:owner/repo#123 [cccm options] [prompt]
 
 cccm のオプション:
+  --via &lt;cloud|routine&gt;    起動方式（必須。既定はない）
   --hub &lt;spec&gt;             状態を書く先。v1 は github:owner/repo#number のみ（必須）
-  --env &lt;env_id&gt;           クラウドの環境 ID（--settings の remote.defaultEnvironmentId に入れる）
+  --env &lt;env_id&gt;           クラウドの環境 ID（--via cloud のみ。--settings の remote.defaultEnvironmentId に入れる）
+  --routine &lt;trig_id&gt;      fire する routine（--via routine のみ、必須）
   --output-format &lt;fmt&gt;    text（既定）| json（最後に結果を 1 つ）| stream-json（イベントを 1 行ずつ）
   --ack-timeout &lt;dur&gt;               ack を待つ時間。既定 5m
   --reminder-grace &lt;dur&gt;            起動直後にリマインダを送らない時間。既定 3m（0 で無効）
@@ -226,7 +246,13 @@ cccm のオプション:
   --timeout &lt;dur&gt;                   全体で待つ時間。既定なし
   --interval &lt;dur&gt;         コメントを読む間隔。既定 10s
   --no-wait                起動して ID と URL を出したら終わる</code></pre>
-<p>cwd の repo が作業 repo になる（claude と同じ）。</p>
+<p><code>--via cloud</code> では cwd の repo が作業 repo になる（claude と同じ）。</p>
+<ul>
+<li><span class="tag chg">第 7 版で追加</span> routine の token は環境変数 <code>CCCM_ROUTINE_TOKEN</code> で受け取る（引数にすると shell の履歴やプロセス一覧に残るため）。token は routine ごとなので、複数の routine を使う呼び出し側（symphony など）は呼び出しごとに環境変数を替える。<code>--via routine</code> で token がなければ引数の誤り（終了コード 2）。</li>
+<li><code>--via routine</code> では <code>--env</code> と claude に渡すオプション（<code>--model</code> など）は使えない（routine の定義で決まるため）。渡されたら引数の誤り。</li>
+<li>fire が 2xx 以外を返したら、応答の <code>error.message</code> を出して終了コード 5。fire は冪等でないので、cccm は再試行しない。</li>
+<li>リマインダは <code>--via</code> に関わらず <code>claude -p … --cloud &lt;session_id&gt;</code> で送る（routine のセッションに送れるかは通し確認で確かめる）。</li>
+</ul>
 
 <h3>cccm monitor</h3>
 <pre><code>cccm monitor --hub github:owner/repo#123 [--session &lt;id&gt;] [options]
@@ -241,7 +267,8 @@ cccm のオプション:
   1. claude plugin marketplace add tomoasleep/claude-code-cloud-monitor
   2. claude plugin install cccm@claude-code-cloud-monitor
   3. ~/.claude/settings.json の permissions.allow に
-     mcp__claude-code-remote__add_repo と Bash(cccm report:*) を足す（既にあれば何もしない）</code></pre>
+     Bash(cccm report:*) を足す（既にあれば何もしない）</code></pre>
+<p><span class="tag chg">第 7 版で変更</span> <code>mcp__claude-code-remote__add_repo</code> は足さない。</p>
 
 <h3>出力（--output-format stream-json）</h3>
 <pre><code>{"type":"launched","session_id":"session_01…","session_url":"https://claude.ai/code/session_01…","hub":"github:owner/repo#123","comment_url":"…"}
@@ -262,7 +289,7 @@ cccm のオプション:
 <tr><td>2</td><td>引数の誤り</td></tr>
 <tr><td>3</td><td>ack が来なかった</td></tr>
 <tr><td>4</td><td><code>--timeout</code> を過ぎた</td></tr>
-<tr><td>5</td><td>起動に失敗した（セッション ID が取れない、hub のコメントを作れない）</td></tr>
+<tr><td>5</td><td>起動に失敗した（セッション ID が取れない、routine の fire が失敗した、hub のコメントを作れない）</td></tr>
 </tbody></table></div>
 </section>
 
@@ -359,6 +386,7 @@ cccm plugin install</code></pre>
 <tr><td>B. hub を作業 repo の Issue に限る</td><td>add_repo が要らない</td><td>状態と報告が作業 repo を見られる人全員に見える</td></tr>
 </tbody></table></div>
 <p>A を選んでも、hub が作業 repo と同じなら add_repo の指示は付けない。</p>
+<p><span class="tag chg">第 7 版で変更</span> 比較は第 6 版までの記録として残す。今は cccm が紐づけ方を選ばない。ユーザーが次のどれかを用意する: routine の定義に hub の repo を入れる（<code>--via routine</code>）、hub を作業 repo の Issue にする、プロンプトで <code>add_repo</code> を指示して承認する。</p>
 
 <h3>9.3 状態をコメントにどう入れるか</h3>
 <div class="table-wrap"><table>
@@ -389,6 +417,7 @@ src/report.ts                    cccm report init|progress|pending|done|failed|h
 src/hub/github.ts                gh でコメントを作る・読む・書く
 src/state.ts                     状態の型、コメントの組み立てと解析
 src/claude.ts                    script 経由の作成、-p --output-format json での送信
+src/routine.ts                   routine の fire API の呼び出し（第 7 版で追加。fetch を注入する）
 plugin/.claude-plugin/plugin.json
 plugin/hooks/hooks.json          command: cccm report hook
 .claude-plugin/marketplace.json

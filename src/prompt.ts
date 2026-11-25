@@ -9,20 +9,12 @@ export function isReminderPrompt(prompt: string): boolean {
   return prompt.startsWith("[cccm] Is the task finished?")
 }
 
-export type PromptOptions = {
-  to: string
-  addRepo: string | null
-}
-
-export function buildPrompt(userPrompt: string, { to, addRepo }: PromptOptions): string {
-  const first = addRepo
-    ? `1. Before starting the task above, add ${addRepo} to this session with the claude-code-remote tool \`add_repo\`, then run:`
-    : "1. Before starting the task above, run:"
+export function buildPrompt(userPrompt: string, to: string): string {
   return `${userPrompt}
 
 ---
 This session reports its status with cccm (claude-code-cloud-monitor).
-${first}
+1. Before starting the task above, run:
      cccm report init --to ${to}
 2. When the task is finished, run:   cccm report done --summary "<what you did>"
    If you cannot finish it, run:    cccm report failed --summary "<why>"

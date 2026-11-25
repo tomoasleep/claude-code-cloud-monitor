@@ -1,4 +1,6 @@
 const CCCM_VALUE_OPTIONS = new Set([
+  "via",
+  "routine",
   "hub",
   "env",
   "session",

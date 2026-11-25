@@ -11,16 +11,16 @@ describe("addAllowedPermissions", () => {
     assert.deepEqual(
       addAllowedPermissions({
         model: "opus",
-        permissions: { allow: ["Bash(git *)", "Bash(cccm report:*)"], deny: ["x"] },
+        permissions: { allow: ["Bash(git *)"], deny: ["x"] },
       }),
       {
         model: "opus",
-        permissions: {
-          allow: ["Bash(git *)", "Bash(cccm report:*)", "mcp__claude-code-remote__add_repo"],
-          deny: ["x"],
-        },
+        permissions: { allow: ["Bash(git *)", "Bash(cccm report:*)"], deny: ["x"] },
       },
     )
+    assert.deepEqual(addAllowedPermissions({ permissions: { allow: ["Bash(cccm report:*)"] } }), {
+      permissions: { allow: ["Bash(cccm report:*)"] },
+    })
   })
 
   test("permissions がなければ作る", () => {

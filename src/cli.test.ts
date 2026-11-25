@@ -38,9 +38,6 @@ async function makeDeps(overrides: Partial<CliDeps> = {}) {
     if (command === "gh") return runCommand(command, args, options)
     calls.push({ command, args })
     if (command === "script") return { exitCode: 0, stdout: CREATE_OUTPUT, stderr: "" }
-    if (command === "git") {
-      return { exitCode: 0, stdout: "https://github.com/octocat/work.git\n", stderr: "" }
-    }
     if (command === "claude") {
       return {
         exitCode: 0,
@@ -50,6 +47,17 @@ async function makeDeps(overrides: Partial<CliDeps> = {}) {
     }
     throw new Error(`unexpected command ${command}`)
   }
+  const fires: { url: string; init: RequestInit }[] = []
+  const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    fires.push({ url: String(url), init: init ?? {} })
+    return new Response(
+      JSON.stringify({
+        type: "routine_fire",
+        claude_code_session_id: SESSION,
+        claude_code_session_url: `https://claude.ai/code/${SESSION}`,
+      }),
+    )
+  }) as typeof globalThis.fetch
   const deps: CliDeps = {
     cwd: "/work",
     env: emu.env,
@@ -64,6 +72,7 @@ async function makeDeps(overrides: Partial<CliDeps> = {}) {
     platform: "darwin",
     tmpdir: stateDir,
     stateDir,
+    fetch,
     ...overrides,
   }
   return {
@@ -71,6 +80,7 @@ async function makeDeps(overrides: Partial<CliDeps> = {}) {
     out,
     err,
     calls,
+    fires,
     advance: (ms: number) => {
       currentTime += ms
     },
@@ -138,6 +148,8 @@ describe("cccm launch", () => {
     const code = await runCli(
       [
         "launch",
+        "--via",
+        "cloud",
         "--hub",
         `github:${OWNER}/${HUB_REPO}#${issue}`,
         "--output-format",
@@ -183,7 +195,7 @@ describe("cccm launch", () => {
     const script = t.calls.find((c) => c.command === "script")!
     assert.deepEqual(script.args.slice(0, 4), ["-q", "/dev/null", "claude", "--cloud"])
     assert.match(script.args[4], /^fix the bug\n/)
-    assert.match(script.args[4], /add octocat\/hub to this session/)
+    assert.doesNotMatch(script.args[4], /add_repo/)
     assert.deepEqual(script.args.slice(5), ["--model", "opus"])
     assert.deepEqual(
       t.calls.filter((c) => c.command === "claude").map((c) => c.args),
@@ -207,6 +219,8 @@ describe("cccm launch", () => {
     const code = await runCli(
       [
         "launch",
+        "--via",
+        "cloud",
         "--hub",
         `github:${OWNER}/${HUB_REPO}#${issue}`,
         "--no-wait",
@@ -233,6 +247,8 @@ describe("cccm launch", () => {
     await runCli(
       [
         "launch",
+        "--via",
+        "cloud",
         "--hub",
         `github:${OWNER}/${HUB_REPO}#${issue}`,
         "--no-wait",
@@ -253,26 +269,13 @@ describe("cccm launch", () => {
     })
   })
 
-  test("hub の repo が作業 repo と同じなら add_repo の指示を付けない", async () => {
-    const issue = await emu.createIssue()
-    const t = await makeDeps()
-    const base = t.deps.runner
-    t.deps.runner = async (command, args, options) =>
-      command === "git"
-        ? { exitCode: 0, stdout: "git@github.com:octocat/hub.git\n", stderr: "" }
-        : base(command, args, options)
-    await runCli(
-      ["launch", "--hub", `github:${OWNER}/${HUB_REPO}#${issue}`, "--no-wait", "task"],
-      t.deps,
-    )
-    const script = t.calls.find((c) => c.command === "script")!
-    assert.doesNotMatch(script.args[4], /add_repo/)
-  })
-
   test("プロンプトを標準入力から読む", async () => {
     const issue = await emu.createIssue()
     const t = await makeDeps({ readStdin: async () => "from stdin\n" })
-    await runCli(["launch", "--hub", `github:${OWNER}/${HUB_REPO}#${issue}`, "--no-wait"], t.deps)
+    await runCli(
+      ["launch", "--via", "cloud", "--hub", `github:${OWNER}/${HUB_REPO}#${issue}`, "--no-wait"],
+      t.deps,
+    )
     const script = t.calls.find((c) => c.command === "script")!
     assert.match(script.args[4], /^from stdin\n/)
   })
@@ -286,7 +289,7 @@ describe("cccm launch", () => {
         ? { exitCode: 1, stdout: "Error: not logged in\n", stderr: "" }
         : base(command, args, options)
     const code = await runCli(
-      ["launch", "--hub", `github:${OWNER}/${HUB_REPO}#${issue}`, "task"],
+      ["launch", "--via", "cloud", "--hub", `github:${OWNER}/${HUB_REPO}#${issue}`, "task"],
       t.deps,
     )
     assert.equal(code, 5)
@@ -297,7 +300,16 @@ describe("cccm launch", () => {
     const issue = await emu.createIssue()
     const t = await makeDeps()
     const code = await runCli(
-      ["launch", "--hub", `github:${OWNER}/${HUB_REPO}#${issue}`, "--ack-timeout", "1m", "task"],
+      [
+        "launch",
+        "--via",
+        "cloud",
+        "--hub",
+        `github:${OWNER}/${HUB_REPO}#${issue}`,
+        "--ack-timeout",
+        "1m",
+        "task",
+      ],
       t.deps,
     )
     assert.equal(code, 3)
@@ -305,7 +317,12 @@ describe("cccm launch", () => {
 
   test("引数が誤っていれば終了コード 2", async () => {
     const t = await makeDeps()
-    assert.equal(await runCli(["launch", "task"], t.deps), 2)
+    assert.equal(await runCli(["launch", "--via", "cloud", "task"], t.deps), 2)
+    assert.equal(await runCli(["launch", "--hub", "github:o/r#1", "task"], t.deps), 2)
+    assert.equal(
+      await runCli(["launch", "--via", "other", "--hub", "github:o/r#1", "task"], t.deps),
+      2,
+    )
     assert.equal(await runCli(["launch", "--hub", "nope", "task"], t.deps), 2)
     assert.equal(
       await runCli(["launch", "--hub", "github:o/r#1", "--interval", "x", "task"], t.deps),
@@ -313,6 +330,100 @@ describe("cccm launch", () => {
     )
     assert.equal(await runCli(["launch", "--hub", "github:o/r#1"], t.deps), 2)
     assert.equal(await runCli(["unknown"], t.deps), 2)
+  })
+
+  test("routine の指定が足りないか、routine では使えないオプションがあれば終了コード 2", async () => {
+    const t = await makeDeps()
+    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: "sk-ant-oat01-t" }
+    const base = ["launch", "--via", "routine", "--hub", "github:o/r#1"]
+    assert.equal(await runCli([...base, "task"], t.deps), 2)
+    assert.equal(
+      await runCli([...base, "--routine", "trig_1", "--model", "opus", "task"], t.deps),
+      2,
+    )
+    assert.equal(
+      await runCli([...base, "--routine", "trig_1", "--env", "env_1", "task"], t.deps),
+      2,
+    )
+    assert.equal(
+      await runCli(
+        ["launch", "--via", "cloud", "--hub", "github:o/r#1", "--routine", "trig_1", "task"],
+        t.deps,
+      ),
+      2,
+    )
+    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: undefined }
+    assert.equal(await runCli([...base, "--routine", "trig_1", "task"], t.deps), 2)
+    assert.match(t.err.join(""), /CCCM_ROUTINE_TOKEN/)
+    assert.deepEqual(t.fires, [])
+  })
+
+  test("--via routine なら routine を fire し、プロンプトを text で渡して待つ", async () => {
+    const issue = await emu.createIssue()
+    const t = await makeDeps()
+    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: "sk-ant-oat01-t" }
+    t.deps.sleep = async (ms) => {
+      t.advance(ms)
+      const text = JSON.parse(String(t.fires[0].init.body)).text as string
+      const to = /cccm report init --to (\S+)/.exec(text)![1]
+      await runCli(["report", "init", "--to", to], cloudDeps(t.deps))
+      await runCli(["report", "done", "--summary", "ok"], cloudDeps(t.deps))
+      await hook(t.deps, { hook_event_name: "Stop", last_assistant_message: "bye" })
+    }
+    const code = await runCli(
+      [
+        "launch",
+        "--via",
+        "routine",
+        "--routine",
+        "trig_01x",
+        "--hub",
+        `github:${OWNER}/${HUB_REPO}#${issue}`,
+        "--output-format",
+        "json",
+        "fix the bug",
+      ],
+      t.deps,
+    )
+    assert.equal(code, 0, t.err.join(""))
+    assert.equal(JSON.parse(t.out.join("")).summary, "ok")
+    assert.equal(t.fires.length, 1)
+    assert.equal(t.fires[0].url, "https://api.anthropic.com/v1/claude_code/routines/trig_01x/fire")
+    assert.match(JSON.parse(String(t.fires[0].init.body)).text, /^fix the bug\n/)
+    assert.deepEqual(
+      t.calls.filter((c) => c.command === "script"),
+      [],
+    )
+  })
+
+  test("routine の fire が失敗したら終了コード 5", async () => {
+    const issue = await emu.createIssue()
+    const t = await makeDeps({
+      fetch: (async () =>
+        new Response(
+          JSON.stringify({
+            type: "error",
+            error: { type: "not_found_error", message: "no routine" },
+          }),
+          { status: 404 },
+        )) as typeof globalThis.fetch,
+    })
+    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: "sk-ant-oat01-t" }
+    const code = await runCli(
+      [
+        "launch",
+        "--via",
+        "routine",
+        "--routine",
+        "trig_x",
+        "--hub",
+        `github:${OWNER}/${HUB_REPO}#${issue}`,
+        "task",
+      ],
+      t.deps,
+    )
+    assert.equal(code, 5)
+    assert.match(t.err.join(""), /404 not_found_error: no routine/)
   })
 })
 

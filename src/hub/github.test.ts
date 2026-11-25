@@ -1,13 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 import { httpResponse, makeFakeRunner } from "../test-utils/fake-runner.ts"
-import {
-  createGitHubHub,
-  formatCommentRef,
-  parseCommentRef,
-  parseHubSpec,
-  parseRepoFromRemoteUrl,
-} from "./github.ts"
+import { createGitHubHub, formatCommentRef, parseCommentRef, parseHubSpec } from "./github.ts"
 
 const env = { GH_TOKEN: "t" }
 
@@ -35,15 +29,6 @@ describe("parseCommentRef / formatCommentRef", () => {
 
   test("形式が違えばエラー", () => {
     assert.throws(() => parseCommentRef("github:octocat/hub#99"), /invalid comment reference/)
-  })
-})
-
-describe("parseRepoFromRemoteUrl", () => {
-  test("https と ssh の remote から owner/repo を取る", () => {
-    assert.equal(parseRepoFromRemoteUrl("https://github.com/octocat/hub.git"), "octocat/hub")
-    assert.equal(parseRepoFromRemoteUrl("git@github.com:octocat/hub.git\n"), "octocat/hub")
-    assert.equal(parseRepoFromRemoteUrl("https://github.com/octocat/hub"), "octocat/hub")
-    assert.equal(parseRepoFromRemoteUrl("/local/path"), null)
   })
 })
 

@@ -4,7 +4,7 @@ import { createCloudSessionClient } from "./claude.ts"
 import { type CommandRunner, runCommand } from "./command.ts"
 import { parseDuration } from "./duration.ts"
 import { createGitHubHub, type IssueRef, parseHubSpec } from "./hub/github.ts"
-import { runLaunch } from "./launch.ts"
+import { type LaunchVia, runLaunch } from "./launch.ts"
 import { findSessionComment, type WaitTimings, waitForCompletion } from "./monitor.ts"
 import { splitClaudeOptions } from "./options.ts"
 import { createReporter, OUTPUT_FORMATS, type OutputFormat } from "./output.ts"
@@ -24,17 +24,21 @@ export type CliDeps = {
   platform: NodeJS.Platform
   tmpdir: string
   stateDir: string
+  fetch: typeof globalThis.fetch
 }
 
 const USAGE = `Usage:
-  cccm launch  --hub github:owner/repo#number [cccm options] [claude options] [prompt]
+  cccm launch  --via cloud --hub github:owner/repo#number [cccm options] [claude options] [prompt]
+  cccm launch  --via routine --routine <trig_id> --hub github:owner/repo#number [cccm options] [prompt]
   cccm monitor --hub github:owner/repo#number [--session <id>] [cccm options]
   cccm plugin install
   cccm report init|progress|pending|done|failed|hook ...
 
 cccm options:
+  --via <cloud|routine>            How to start the session (launch only, required)
+  --routine <trig_id>              Routine to fire (--via routine). The token is read from CCCM_ROUTINE_TOKEN
   --hub <spec>                     Where to write the status (github:owner/repo#number)
-  --env <env_id>                   Cloud environment ID (launch only)
+  --env <env_id>                   Cloud environment ID (--via cloud)
   --output-format <fmt>            text (default) | json | stream-json
   --ack-timeout <dur>              Default 5m
   --reminder-grace <dur>           Default 3m (0 disables)
@@ -43,7 +47,7 @@ cccm options:
   --interval <dur>                 Default 10s
   --no-wait                        Exit after the session is created (launch only)
 
-Other options are passed to claude --cloud. Use --option=value for options cccm does not know.
+With --via cloud, other options are passed to claude --cloud. Use --option=value for options cccm does not know.
 `
 
 class UsageError extends Error {}
@@ -141,9 +145,7 @@ async function launch(argv: string[], deps: CliDeps): Promise<number> {
       hubSpec,
       issue,
       prompt,
-      claudeArgs: split.claude,
-      settings: split.settings,
-      environmentId: value("env") ?? null,
+      via: parseVia(split, value, deps.env),
       noWait: split.cccm["no-wait"] === true,
       timings,
     },
@@ -152,6 +154,37 @@ async function launch(argv: string[], deps: CliDeps): Promise<number> {
   )
   reporter.finish()
   return code
+}
+
+function parseVia(
+  split: ReturnType<typeof splitClaudeOptions>,
+  value: (name: string) => string | undefined,
+  env: CliDeps["env"],
+): LaunchVia {
+  const via = value("via")
+  if (via === "cloud") {
+    if (value("routine")) throw new UsageError("--routine is only for --via routine")
+    return {
+      kind: "cloud",
+      claudeArgs: split.claude,
+      settings: split.settings,
+      environmentId: value("env") ?? null,
+    }
+  }
+  if (via === "routine") {
+    const routineId = value("routine")
+    if (!routineId) throw new UsageError("--via routine requires --routine <trig_id>")
+    if (value("env") || split.settings || split.claude.length > 0) {
+      throw new UsageError(
+        "--via routine does not take --env or claude options; the routine definition decides them",
+      )
+    }
+    const token = env.CCCM_ROUTINE_TOKEN
+    if (!token)
+      throw new UsageError("--via routine requires the routine token in CCCM_ROUTINE_TOKEN")
+    return { kind: "routine", routineId, token }
+  }
+  throw new UsageError(via ? `unknown --via: ${via}` : "--via cloud|routine is required")
 }
 
 async function monitor(argv: string[], deps: CliDeps): Promise<number> {
@@ -192,5 +225,6 @@ export function main(): Promise<number> {
     platform: process.platform,
     tmpdir: tmpdir(),
     stateDir: join(tmpdir(), "cccm"),
+    fetch: globalThis.fetch,
   })
 }

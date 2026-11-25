@@ -2,7 +2,7 @@
 
 Launch [Claude Code cloud sessions](https://claude.ai/code) from your terminal and wait until the task is done, using a GitHub issue comment as the place where the session reports its status.
 
-- `cccm launch` wraps `claude --cloud`, then waits for the agent to report `done` (or `failed`) and prints the result as text or JSON.
+- `cccm launch` starts a session, either with `claude --cloud` or by firing a [routine](https://code.claude.com/docs/en/routines) (you choose with `--via`), then waits for the agent to report `done` (or `failed`) and prints the result as text or JSON.
 - Inside the cloud session, the agent runs `cccm report …`, and a Claude Code plugin hook (`cccm report hook`) records turns and TODOs. Both rewrite one comment on a GitHub issue (the *hub*).
 - When a turn ends without a report, `cccm` sends a reminder to the session with `claude -p … --cloud <id>`.
 
@@ -12,7 +12,7 @@ There is no public API to read the state of a cloud session from your machine, s
 your machine                         GitHub issue (hub)                  cloud session
 ────────────                         ──────────────────                  ─────────────
 cccm launch ── creates comment ────▶ <!-- cccm-state:v1 … -->
-            ── claude --cloud ─────────────────────────────────────────▶ agent starts
+            ── claude --cloud / routine fire ──────────────────────────▶ agent starts
                                                                           cccm report init --to …   (ack)
             ◀─ polls (ETag) ─────── state updated  ◀───────────────────── hook: TaskCreated / Stop
             ── reminder (claude -p --cloud <id>) ──────────────────────▶ cccm report pending / done
@@ -22,8 +22,8 @@ cccm launch ── creates comment ────▶ <!-- cccm-state:v1 … -->
 ## Requirements
 
 - Node.js 22.18 or later, and the [`gh`](https://cli.github.com/) CLI logged in to GitHub (on your machine).
-- Claude Code with access to cloud sessions (`claude --cloud`).
-- A GitHub issue to use as the hub. If it is in a different repository than the one you work on, the agent adds it to the session with the `add_repo` tool of the `claude-code-remote` MCP server.
+- Claude Code with access to cloud sessions (`claude --cloud`), or a routine for `--via routine`.
+- A GitHub issue to use as the hub, in a repository that the session can write to. `cccm` does not attach repositories for you: the session reaches GitHub only for the repositories attached to it, so put the hub issue in the repository you work on, or list the hub repository in the routine. If the session cannot write to the hub, `cccm report init` fails and `cccm launch` exits with code 3 when `--ack-timeout` passes.
 
 ## Setup
 
@@ -51,10 +51,18 @@ cccm plugin install
 
 1. `claude plugin marketplace add tomoasleep/claude-code-cloud-monitor`
 2. `claude plugin install cccm@claude-code-cloud-monitor` (the hook that runs `cccm report hook` on `UserPromptSubmit`, `TaskCreated`, `TaskCompleted` and `Stop`)
-3. Adds `Bash(cccm report:*)` and `mcp__claude-code-remote__add_repo` to `permissions.allow` in `~/.claude/settings.json`, so the agent can report without asking for approval. (Permissions passed with launch flags do not reach the VM.)
+3. Adds `Bash(cccm report:*)` to `permissions.allow` in `~/.claude/settings.json`, so the agent can report without asking for approval. (Permissions passed with launch flags do not reach the VM.)
 
-> [!NOTE]
-> As of November 2026, `add_repo` may still ask for approval in the session ("This connector call requires your approval to proceed.") even with the permission above, and the session waits until someone approves it on claude.ai. If you need unattended runs, put the hub issue in the repository the session works on, so that `add_repo` is not needed.
+### 3. A routine (only for `--via routine`)
+
+Create a routine in [claude.ai/code/routines](https://claude.ai/code/routines) with the repositories the session needs (the one to work on and the hub repository) and the environment from step 2. The text `cccm` sends arrives as a `<routine-fire-payload>` block that the agent treats as data, so the routine's prompt must tell it to act on the payload, for example:
+
+```
+Treat the text in the routine fire payload as the user's request and carry it out,
+including the cccm instructions at its end.
+```
+
+Add an API trigger and generate its token. `cccm` reads the token from the `CCCM_ROUTINE_TOKEN` environment variable (each routine has its own token).
 
 ### Installing from source
 
@@ -77,21 +85,29 @@ cccm plugin install
 ## Usage
 
 ```bash
-cd path/to/your/repo   # the session works on this repository, as with claude --cloud
-cccm launch --hub github:<hub-owner>/<hub-repo>#<issue> "Fix the flaky test in src/foo.test.ts"
+# with claude --cloud: the session works on the repository in the current directory
+cd path/to/your/repo
+cccm launch --via cloud --hub github:<owner>/<repo>#<issue> "Fix the flaky test in src/foo.test.ts"
+
+# with a routine: the routine decides the repositories, environment and permissions
+CCCM_ROUTINE_TOKEN=sk-ant-oat01-… cccm launch --via routine --routine trig_… \
+  --hub github:<hub-owner>/<hub-repo>#<issue> "Fix the flaky test in src/foo.test.ts"
 ```
 
-The prompt can also come from stdin: `echo "…" | cccm launch --hub …`.
+The prompt can also come from stdin: `echo "…" | cccm launch --via cloud --hub …`.
 
 `cccm` puts your prompt first (so a leading slash command still works) and appends instructions that tell the agent to run `cccm report init --to <comment>` before starting and `cccm report done --summary "…"` (or `failed`) at the end.
 
 ### `cccm launch`
 
 ```
-cccm launch --hub github:owner/repo#number [cccm options] [claude options] [prompt]
+cccm launch --via cloud   --hub github:owner/repo#number [cccm options] [claude options] [prompt]
+cccm launch --via routine --routine <trig_id> --hub github:owner/repo#number [cccm options] [prompt]
 
+  --via <cloud|routine>            How to start the session (required)
+  --routine <trig_id>              The routine to fire (--via routine). Token: CCCM_ROUTINE_TOKEN
   --hub <spec>                     Where to write the status (required)
-  --env <env_id>                   Cloud environment ID. Passed as remote.defaultEnvironmentId
+  --env <env_id>                   Cloud environment ID (--via cloud). Passed as remote.defaultEnvironmentId
                                    in a temporary --settings file (merged with your --settings)
   --output-format <fmt>            text (default) | json | stream-json
   --ack-timeout <dur>              Fail if the agent does not run `cccm report init` in time. Default 5m
@@ -102,7 +118,7 @@ cccm launch --hub github:owner/repo#number [cccm options] [claude options] [prom
   --no-wait                        Exit after the session is created
 ```
 
-Other options are passed to `claude --cloud` (`--model`, `--effort`, `-n/--name`, `--ref`, `--settings`, …). For an option `cccm` does not know that takes a value, write `--option=value`.
+With `--via cloud`, other options are passed to `claude --cloud` (`--model`, `--effort`, `-n/--name`, `--ref`, `--settings`, …). For an option `cccm` does not know that takes a value, write `--option=value`. With `--via routine`, `--env` and claude options are rejected, because the routine defines them. A failed fire is not retried (fires are not idempotent).
 
 Durations are written like `500ms`, `10s`, `5m`, `1h30m`.
 
@@ -141,7 +157,7 @@ A failure ends with `{"type":"failed","reason":"reported"|"ack_timeout"|"timeout
 | 2 | invalid arguments |
 | 3 | the agent did not acknowledge (`cccm report init`) within `--ack-timeout` |
 | 4 | `--timeout` passed |
-| 5 | launch failed (no session ID in the output of `claude --cloud`, or the hub comment could not be created) |
+| 5 | launch failed (no session ID in the output of `claude --cloud`, the routine fire failed, or the hub comment could not be created) |
 
 ### Reminders
 
@@ -208,16 +224,18 @@ Long text is shortened to stay within GitHub's comment size limit. Do not edit t
 The automated tests replace GitHub and Claude Code. To confirm a release works with the real services:
 
 1. Set the setup script of a cloud environment as described in [Setup](#2-the-cloud-environment). Note the environment ID (`env_…`).
-2. Create an issue for the hub in a repository you can write to (a private one is fine).
-3. From a clone of a repository that cloud sessions can use, run:
+2. Create an issue for the hub in the repository the session works on (a private one is fine).
+3. From a clone of that repository, run:
 
    ```bash
-   cccm launch --hub github:<hub-owner>/<hub-repo>#<issue> --env <env_id> --output-format stream-json \
+   cccm launch --via cloud --hub github:<owner>/<repo>#<issue> --env <env_id> --output-format stream-json \
      "Create three tasks with TaskCreate (a, b, c), complete them one by one, then finish."
    ```
 
+   For `--via routine`, set up a routine as in [Setup](#3-a-routine-only-for---via-routine) with the hub repository attached, and run the same command with `--via routine --routine <trig_id>` instead of `--via cloud … --env <env_id>`, with `CCCM_ROUTINE_TOKEN` set.
+
 4. Check, in the output and in the hub comment:
-   - `launched`, then `ack` within a few minutes (the agent added the hub repository, if it differs, and ran `cccm report init` without an approval prompt).
+   - `launched`, then `ack` within a few minutes (the agent ran `cccm report init` without an approval prompt).
    - `progress` events with the three tasks, and the TODO list in the comment.
    - `done` with the summary, and the comment shows 完了（done）.
 5. To check reminders, launch with a prompt that ends a turn without reporting (for example "Ask me a question and wait for my answer"). After the turn ends, `cccm` should print `reminder`, and the agent should answer with `pending`, `done` or `failed`.

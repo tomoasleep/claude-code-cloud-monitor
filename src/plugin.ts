@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import type { CommandRunner } from "./command.ts"
 
-export const REQUIRED_PERMISSIONS = ["Bash(cccm report:*)", "mcp__claude-code-remote__add_repo"]
+export const REQUIRED_PERMISSIONS = ["Bash(cccm report:*)"]
 
 const MARKETPLACE = "tomoasleep/claude-code-cloud-monitor"
 const PLUGIN = "cccm@claude-code-cloud-monitor"

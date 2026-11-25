@@ -1,27 +1,24 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { type CloudSessionClient, mergeEnvironmentIntoSettings } from "./claude.ts"
-import type { CommandRunner } from "./command.ts"
-import {
-  formatCommentRef,
-  type HubClient,
-  type IssueRef,
-  parseRepoFromRemoteUrl,
-} from "./hub/github.ts"
+import { formatCommentRef, type HubClient, type IssueRef } from "./hub/github.ts"
 import { type WaitTimings, waitForCompletion } from "./monitor.ts"
 import type { Reporter } from "./output.ts"
 import { buildPrompt } from "./prompt.ts"
 import { applyReport } from "./report.ts"
+import { fireRoutine } from "./routine.ts"
 import { newState, parseComment, renderComment, sessionUrl } from "./state.ts"
 import { EXIT } from "./wait.ts"
+
+export type LaunchVia =
+  | { kind: "cloud"; claudeArgs: string[]; settings: string | null; environmentId: string | null }
+  | { kind: "routine"; routineId: string; token: string }
 
 export type LaunchOptions = {
   hubSpec: string
   issue: IssueRef
   prompt: string
-  claudeArgs: string[]
-  settings: string | null
-  environmentId: string | null
+  via: LaunchVia
   noWait: boolean
   timings: WaitTimings
 }
@@ -29,9 +26,7 @@ export type LaunchOptions = {
 export type LaunchDeps = {
   hub: HubClient
   cloud: CloudSessionClient
-  runner: CommandRunner
-  cwd: string
-  env: Record<string, string | undefined>
+  fetch: typeof globalThis.fetch
   tmpdir: string
   now: () => number
   sleep: (ms: number) => Promise<void>
@@ -54,17 +49,11 @@ export async function runLaunch(
     return EXIT.launchFailed
   }
 
-  const hubRepo = `${options.issue.owner}/${options.issue.repo}`
-  const workRepo = await detectWorkRepo(deps)
-  const prompt = buildPrompt(options.prompt, {
-    to: formatCommentRef(comment.ref),
-    addRepo: workRepo === hubRepo ? null : hubRepo,
-  })
+  const prompt = buildPrompt(options.prompt, formatCommentRef(comment.ref))
 
   let session: { sessionId: string; url: string }
   try {
-    const settingsPath = await prepareSettings(options, deps, startedAt)
-    session = await deps.cloud.create({ prompt, claudeArgs: options.claudeArgs, settingsPath })
+    session = await createSession(options.via, prompt, deps, startedAt)
   } catch (error) {
     const message = (error as Error).message
     deps.writeErr(`cccm: could not launch the cloud session: ${message}\n`)
@@ -88,20 +77,21 @@ export async function runLaunch(
   return waitForCompletion(comment.ref, startedAt, options.timings, reporter, deps)
 }
 
-async function detectWorkRepo(deps: LaunchDeps): Promise<string | null> {
-  try {
-    const result = await deps.runner("git", ["remote", "get-url", "origin"], {
-      cwd: deps.cwd,
-      env: deps.env,
-    })
-    return result.exitCode === 0 ? parseRepoFromRemoteUrl(result.stdout) : null
-  } catch {
-    return null
+async function createSession(
+  via: LaunchVia,
+  prompt: string,
+  deps: LaunchDeps,
+  startedAt: number,
+): Promise<{ sessionId: string; url: string }> {
+  if (via.kind === "routine") {
+    return fireRoutine({ routineId: via.routineId, token: via.token, text: prompt }, deps.fetch)
   }
+  const settingsPath = await prepareSettings(via, deps, startedAt)
+  return deps.cloud.create({ prompt, claudeArgs: via.claudeArgs, settingsPath })
 }
 
 async function prepareSettings(
-  options: LaunchOptions,
+  options: Extract<LaunchVia, { kind: "cloud" }>,
   deps: LaunchDeps,
   startedAt: number,
 ): Promise<string | null> {
