@@ -50,6 +50,9 @@ cccm plugin install
 2. `claude plugin install cccm@claude-code-cloud-monitor` (the hook that runs `cccm report hook` on `UserPromptSubmit`, `TaskCreated`, `TaskCompleted` and `Stop`)
 3. Adds `Bash(cccm report:*)` and `mcp__claude-code-remote__add_repo` to `permissions.allow` in `~/.claude/settings.json`, so the agent can report without asking for approval. (Permissions passed with launch flags do not reach the VM.)
 
+> [!NOTE]
+> As of November 2026, `add_repo` may still ask for approval in the session ("This connector call requires your approval to proceed.") even with the permission above, and the session waits until someone approves it on claude.ai. If you need unattended runs, put the hub issue in the repository the session works on, so that `add_repo` is not needed.
+
 <details>
 <summary>Installing from source instead of npm</summary>
 
