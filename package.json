@@ -22,7 +22,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepare": "npm run build",
+    "prepack": "npm run build",
     "test": "node --test \"src/**/*.test.ts\"",
     "test:e2e": "node --test \"src/e2e/**/*.e2e.test.ts\"",
     "typecheck": "tsc --noEmit",
