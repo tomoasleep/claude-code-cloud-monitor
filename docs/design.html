@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cccm 詳細設計</title>
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #1f2328; --muted: #5b6168; --line: #d9d6cf;
+  --accent: #2f5d8a; --soft: #eef2f6; --warn: #8a5a00; --warn-bg: #fbf3e2;
+  --ok: #2d6a3e; --ok-bg: #e9f4ec; --code: #f2f0eb; --chg: #6b3fa0; --chg-bg: #f1ebf8;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16181b; --fg: #e6e6e3; --muted: #a3a8ae; --line: #33373c;
+    --accent: #8fb6dc; --soft: #1e2630; --warn: #e3b55e; --warn-bg: #2b2414;
+    --ok: #8ccf9c; --ok-bg: #18271c; --code: #22252a; --chg: #c9a7f0; --chg-bg: #251c30; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+main { max-width: 920px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 1.7rem; line-height: 1.35; margin: 0 0 4px; }
+h2 { font-size: 1.25rem; margin: 48px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.05rem; margin: 28px 0 8px; }
+p, li { max-width: 72ch; }
+.lead { color: var(--muted); margin: 0 0 24px; }
+nav.toc { background: var(--soft); border-radius: 8px; padding: 12px 16px; margin: 16px 0 8px; }
+nav.toc ol { margin: 0; padding-left: 1.3em; columns: 2; column-gap: 32px; }
+@media (max-width: 640px) { nav.toc ol { columns: 1; } }
+a { color: var(--accent); }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+th { background: var(--soft); font-weight: 600; }
+.tag { display: inline-block; font-size: 0.78rem; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.tag.decided { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+.tag.open { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+.tag.verify { color: var(--accent); background: var(--soft); border-color: transparent; }
+.tag.chg { color: var(--chg); background: var(--chg-bg); border-color: transparent; }
+.box { border-left: 4px solid var(--chg); background: var(--chg-bg); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; }
+ol.flow > li { margin-bottom: 6px; }
+.q { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.q h3 { margin-top: 0; }
+.rec { font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>claude-code-cloud-monitor（cccm）詳細設計</h1>
+<p class="lead">Claude Code のクラウドセッションを手元の CLI から起動・監視するための OSS。第 6 版（2026-11-25、5 回目の注釈 2 件を反映）。<span class="tag decided">決定済み</span> は tomoasleep の合意があるもの、<span class="tag open">未決</span> は「未決の事項」で聞くもの、<span class="tag verify">検証済み</span> はクラウドで試して確かめたもの、<span class="tag chg">第 N 版で変更</span> はその版で変えたところ。</p>
+</header>
+
+<div class="box">
+<p><strong>第 6 版の主な変更</strong>（5 回目の注釈 2 件）</p>
+<ul>
+<li>herdr-symphony のテストの作りと書き方（deps の注入、CommandRunner、待ちの 1 歩ずつの実行、時計の注入、引数の純粋関数、runCli、Docker の e2e）を取り入れた（10 章）。</li>
+<li>gh を環境変数で emulate に向けられることを確かめた（GH_HOST=github.localhost と HTTP_PROXY）。本番は gh api のまま（10 章）。</li>
+<li>テストも Node。</li>
+</ul>
+<p><strong>第 5 版の主な変更</strong>（4 回目の注釈 1 件）</p>
+<ul>
+<li>テストを herdr-symphony の構成に揃え、GitHub と LLM を vercel-labs/emulate で置き換える 4 層にした（10 章）。GitHub の呼び方（Q4）とテストの実行環境（Q5）を聞く。</li>
+</ul>
+<p><strong>第 4 版の主な変更</strong>（3 回目の注釈 4 件）</p>
+<ul>
+<li>送り先は <code>cccm report init --to …</code> で 1 回だけ設定し、init が ack を兼ねる。以後のコマンドと hook は <code>--to</code> なしで同じ先に書く。プロンプトの印はやめた（4 章、6 章）。</li>
+<li>リマインダを受けて作業を続けるときも <code>pending</code> を送らせ、リマインダをいったん止める（4 章）。</li>
+<li>コメントは「## 直近の応答」の見出しの下を <code>&lt;details&gt;</code> で畳む（7 章）。</li>
+<li>例に出していた私的な repo の名前は仮の名前なので、<code>&lt;hub-owner&gt;/&lt;hub-repo&gt;</code> に置き換えた。</li>
+</ul>
+<p><strong>第 3 版の主な変更</strong></p>
+<ul>
+<li>VM への導入の 3 項目をクラウドで検証した（8 章）。setup script で入れた plugin の hook は発火し、<code>Bash(cccm report:*)</code> は承認なしで通った。</li>
+<li>リマインダを herdr-symphony に揃えた。報告の状態は <code>done</code> / <code>pending</code> / <code>failed</code>。起動直後 3 分は送らない、<code>pending</code> は 15 分ごとに再送、回数の上限は設けず <code>--timeout</code> で止める（4 章）。</li>
+<li>hook がターンの終わり（<code>Stop</code>）を書くので、done が来ないことは自動で検知してリマインダを送れる、と比較に書き直した（9.1）。</li>
+<li>Rate Limit: Issue の events API にはコメントの編集が出ないため使えない。代わりに <code>ETag</code> の条件付きリクエスト（304 は rate limit を消費しない）と、repo 全体のコメント一覧（<code>sort=updated&amp;since=</code>）でまとめて読む（4 章、9.4）。</li>
+<li>コメントの「直近の返答」は <code>&lt;details&gt;</code> に入れる（7 章）。</li>
+</ul>
+<p><strong>第 2 版の主な変更</strong></p>
+<ul>
+<li>CLI の引数を claude の CLI に寄せた。cccm 固有でないオプションは <code>claude --cloud</code> にそのまま渡す。</li>
+<li>クラウド側にも cccm を入れ、エージェントが <code>cccm report ack</code> / <code>cccm report done</code> を明示的に実行する。hook も <code>cccm report hook</code> を呼ぶだけにする（Node）。</li>
+<li>launch はターンの終わりでは止めず、<code>done</code> が来るまで待つ。done なしでターンが終わったら、<code>claude -p "…" --cloud &lt;id&gt; --output-format json</code> でリマインダを送る。</li>
+<li>後から監視を始める attach は今回やらない（やるなら <code>cccm attach</code>）。</li>
+</ul>
+</div>
+
+<nav class="toc" aria-label="目次">
+<ol>
+<li><a href="#goal">目的</a></li>
+<li><a href="#constraints">制約</a></li>
+<li><a href="#past">過去の検討</a></li>
+<li><a href="#overview">全体の流れ</a></li>
+<li><a href="#cli">手元の CLI</a></li>
+<li><a href="#report">クラウド側の cccm report</a></li>
+<li><a href="#state">状態のコメントの形式</a></li>
+<li><a href="#install">VM への導入</a></li>
+<li><a href="#compare">候補と比較</a></li>
+<li><a href="#layout">リポジトリの構成とテスト</a></li>
+<li><a href="#open">未決の事項</a></li>
+<li><a href="#impl">実装者に任せること</a></li>
+</ol>
+</nav>
+
+<section id="goal">
+<h2>1. 目的</h2>
+<p>手元の CLI から Claude Code のクラウドセッション（claude.ai/code）を起動し、そのセッションのタスクが終わったこと（done）・途中の TODO・最後の報告を受け取れるようにする。herdr-symphony などのツールが JSON で使える形にする。</p>
+<p>終わりの状態: 次のコマンドが動き、README の手順だけで他の人が使える。</p>
+<ul>
+<li>手元: <code>cccm launch</code>（<code>claude --cloud</code> を包んで起動し、done まで待つ）、<code>cccm monitor</code>（起動済みのセッションを同じように待つ）、<code>cccm plugin install</code>（VM に hook を入れる）。</li>
+<li>クラウド: <code>cccm report init|progress|pending|done|failed|hook</code>（hub に状態を書く）。</li>
+</ul>
+</section>
+
+<section id="constraints">
+<h2>2. 制約</h2>
+<h3>変えられない前提（外部の仕様・実験で確かめた事実）</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>事実</th><th>根拠</th></tr></thead>
+<tbody>
+<tr><td>新しいセッションの作成は対話の起動だけ。<code>claude -p … --cloud</code> は「<code>--cloud cannot be combined with --print</code>」で拒否される。<code>--output-format json</code> を付けても作成時の出力はテキスト（<code>Created cloud session</code> / <code>View: &lt;URL&gt;</code>）のまま。TTY がないと起動しないので <code>script</code> を使う。</td><td>実験（2026-11-25、claude 2.1.331）</td></tr>
+<tr><td>既存のセッションへの送信は <code>claude -p "msg" --cloud &lt;id&gt; --output-format json</code> で TTY なしにでき、<code>{"ok":true,"session_id":…,"url":…}</code> が返る。</td><td>実験（2026-11-24）</td></tr>
+<tr><td>環境は <code>--settings &lt;file&gt;</code> の <code>remote.defaultEnvironmentId</code> で起動ごとに選べる。<code>--environment</code> は自前の環境（<code>ccpool_</code>）専用。</td><td>実験（2026-11-25）、anthropics/claude-code#111691</td></tr>
+<tr><td><code>--cloud</code> で紐づく repo は cwd の repo 1 つだけ。</td><td>実験（2026-11-25）、docs</td></tr>
+<tr><td>クラウドから GitHub の REST が通るのは、セッションに紐づいた repo だけ。GraphQL は通らない。</td><td>実験（2026-11-24）</td></tr>
+<tr><td>セッションの中で <code>add_repo</code> を使うと repo を足せる。VM の <code>~/.claude/settings.json</code> の <code>permissions.allow</code> に入れておけば承認なしで通る。起動フラグの権限は VM に届かない。</td><td>実験（2026-11-25）</td></tr>
+<tr><td>hook はクラウドでも発火し、紐づいた repo の Issue のコメントを REST の PATCH で書き換えられた。</td><td>実験（2026-11-25）</td></tr>
+<tr><td><code>CLAUDE_CODE_REMOTE_SESSION_ID</code>（<code>cse_…</code>）は Bash と hook の両方で読め、先頭を <code>session_</code> に替えると claude.ai の URL になる。<code>CLAUDE_CODE_REMOTE=true</code> はクラウドでだけ立つ。</td><td>実験（2026-11-25）</td></tr>
+</tbody></table></div>
+
+<h3>決定済み（tomoasleep、2026-11-25、チャットと Plannotator）</h3>
+<ul>
+<li>public の <code>tomoasleep/claude-code-cloud-monitor</code>。社内・私的な repo や組織の名前は入れない。</li>
+<li>TypeScript、実行時の依存なし、npm で配る（bin は <code>cccm</code>）。hook も Node。</li>
+<li>hook は Claude Code plugin として配り、<code>cccm plugin install</code> で導入する。<code>PostToolUse</code> は全ツールにはかけない。</li>
+<li>CLI は claude の CLI に寄せる（追加するオプション以外）。</li>
+<li>ack はエージェントに明示的に行わせる。hub の repo が作業 repo と違うときは、その前に <code>add_repo</code> させる。ack が 5 分以内に来なければ失敗。</li>
+<li>launch は done が来るまで止めない。done なしでターンが終わったら、リマインダを送る（herdr-symphony と同様）。</li>
+<li>attach（cccm が起動していないセッションの監視）は今回やらない。</li>
+</ul>
+</section>
+
+<section id="past">
+<h2>3. 過去の検討</h2>
+<p>探した場所: 手元の実験の記録、以前に私的な repo で作った状態報告の hook、getty104/claude-task-worker、anthropics/claude-code の Issue、第 1 版への注釈。</p>
+<ul>
+<li><strong>claude-task-worker</strong>: エージェントに最後の操作でラベルを付けさせ、手元が poll する。4 時間で打ち切り。cccm は「エージェントの明示的な報告（ack / done）」と「hook の自動の報告（ターンの終わり・TODO）」を組み合わせ、done が来ないときはリマインダで促す点が違う。</li>
+<li><strong>第 1 版</strong>: hook だけで報告し、最初のターンの終わりで launch を止める案だった。ターンの終わりはタスクの完了を意味しない（質問で止まる場合もある）ため、明示的な done に変えた。</li>
+</ul>
+</section>
+
+<section id="overview">
+<h2>4. 全体の流れ <span class="tag chg">第 2 版で変更</span></h2>
+<ol class="flow">
+<li><strong>hub を用意</strong>: 手元の <code>gh</code> で hub の Issue に状態のコメントを 1 つ作る（状態 <code>launching</code>）。</li>
+<li><strong>プロンプトを組み立てる</strong>: ユーザーのプロンプトを先頭に置き（スラッシュコマンドを Skill として起動させるため）、後ろに cccm の指示を足す（下の「エージェントへの指示」）。</li>
+<li><strong>起動</strong>: <code>script</code> 経由で <code>claude --cloud &lt;prompt&gt; [渡されたオプション]</code>。出力からセッション ID と URL を取る。<code>--env</code> があれば <code>--settings</code> の一時ファイルで渡す。</li>
+<li><strong>ack を待つ</strong>: エージェントが <code>cccm report init</code> を実行し、状態に <code>acked_at</code> が入るのを待つ。<code>--ack-timeout</code>（既定 5 分）を過ぎたら失敗。</li>
+<li><strong>done を待つ</strong> <span class="tag chg">第 3 版で変更</span>: コメントを poll（既定 10 秒ごと、<code>ETag</code> の条件付きリクエスト）。途中経過（TODO、progress、ターンの終わり）を出力する。
+  <ul>
+  <li><code>done</code> または <code>failed</code> が来たら、最終の報告を出して終わる。</li>
+  <li>報告なしでターンが終わった（hook が <code>turn_ended</code> を書いた）ら、<code>claude -p "&lt;リマインダ&gt;" --cloud &lt;id&gt; --output-format json</code> でリマインダを送る。ただし起動から <code>--reminder-grace</code>（既定 3 分）の間は送らない。</li>
+  <li><code>pending</code> が報告されたら待ち続け、<code>--pending-remind-interval</code>（既定 15 分）ごとにリマインダを再送する。</li>
+  <li>回数の上限は設けない。<code>--timeout</code> を過ぎたら失敗。</li>
+  </ul>
+  <p>以上は herdr-symphony の <code>report_file</code> 方式（<code>done</code> / <code>pending</code> / <code>failed</code>、<code>reminder_grace_period_ms</code> 3 分、<code>pending_remind_interval_ms</code> 15 分、idle で報告がなければリマインド）に揃えた。リマインダの送信は、2026-11-25 に <code>claude -p … --cloud &lt;id&gt; --output-format json</code> で送れること、送ったメッセージでも hook の <code>UserPromptSubmit</code> が発火することを確かめた。</p></li>
+</ol>
+
+<h3>GitHub の読み方（Rate Limit） <span class="tag chg">第 3 版で追加</span></h3>
+<ul>
+<li>1 つのセッションを待つとき: そのコメントを <code>GET /repos/{o}/{r}/issues/comments/{id}</code> で、前回の <code>ETag</code> を <code>If-None-Match</code> に付けて読む。変わっていなければ 304 が返り、docs によれば rate limit を消費しない（「Making a conditional request does not count against your primary rate limit if a <code>304</code> response is returned」）。2026-11-25 に、15 回の 304 で残りがほぼ減らないことを確かめた（同じ token を他でも使っていたため、厳密な数ではない）。</li>
+<li>同じ hub の repo で複数のセッションを待つとき（symphony など）: <code>GET /repos/{o}/{r}/issues/comments?sort=updated&amp;direction=desc&amp;since=&lt;前回&gt;</code> を <code>ETag</code> 付きで 1 回読み、変わったコメントだけを処理する。この形の呼び出しが 200 を返すことは確かめた（引数の docs は未読）。</li>
+<li>Issue の events API（<code>/issues/events</code>）と timeline はコメントの編集を出さないので使わない（docs に編集のイベントがない）。</li>
+<li>クラウド側の書き込みは event ごとの PATCH 1 回。docs の目安（内容を作る要求は 1 分に 80 回、1 時間に 500 回まで）には、通常のタスクでは届かない。</li>
+</ul>
+
+<h3>エージェントへの指示（プロンプトの後ろに足す文）</h3>
+<pre><code>---
+This session reports its status with cccm (claude-code-cloud-monitor).
+1. Before starting the task above,
+   [only when the hub repo differs from this repo:]
+   add &lt;hub-owner&gt;/&lt;hub-repo&gt; to this session with the claude-code-remote tool `add_repo`,
+   then run:
+     cccm report init --to github:&lt;hub-owner&gt;/&lt;hub-repo&gt;/comments/123
+2. When the task is finished, run:   cccm report done --summary "&lt;what you did&gt;"
+   If you cannot finish it, run:    cccm report failed --summary "&lt;why&gt;"
+   Do not end without running one of them.</code></pre>
+<p><span class="tag chg">第 4 版で変更</span> 送り先は <code>cccm report init</code> で 1 回だけ渡し、以後のコマンドと hook はそれを使う。init は ack を兼ねる。プロンプトに印（HTML コメント）を入れるのはやめた。例の hub の repo は仮の名前（実験で使った repo は OSS ではないので、文書には出さない）。</p>
+<p>英語にするのは、作業のプロンプトの言語に関わらずツールの使い方として読ませるため。文面の細部は実装で詰める。</p>
+
+<h3>リマインダの文面</h3>
+<pre><code>[cccm] Is the task finished?
+If it is, run:       cccm report done    --summary "..."
+If it failed, run:   cccm report failed  --summary "..."
+If you are continuing the task (or background work is still running), first run:
+                     cccm report pending --summary "&lt;what remains&gt;"
+then continue.</code></pre>
+<p>herdr-symphony の <code>REMINDER_TEXT</code> と同じ問い方にした。<span class="tag chg">第 4 版で変更</span> 作業を続ける場合も <code>pending</code> を送らせ、リマインダをいったん止める（次のリマインダは <code>--pending-remind-interval</code> の後）。</p>
+</section>
+
+<section id="cli">
+<h2>5. 手元の CLI <span class="tag chg">第 2 版で変更</span></h2>
+<h3>方針: claude の CLI に寄せる</h3>
+<ul>
+<li>プロンプトは claude と同じく位置引数で渡す。標準入力からも読む（<code>echo "…" | cccm launch --hub …</code>）。</li>
+<li>出力形式は claude と同じ名前の <code>--output-format text|json|stream-json</code>。</li>
+<li>cccm が知らないオプションは、そのまま <code>claude --cloud</code> に渡す（<code>--model</code>、<code>--effort</code>、<code>-n/--name</code>、<code>--ref</code>、<code>--on-branch</code>、<code>--settings</code> など）。<code>--settings</code> が渡されたときは、<code>--env</code> の値をその中身に重ねた一時ファイルを作って渡す。</li>
+<li><code>-p/--print</code> の扱い: <span class="tag open">未決</span>（Q1）。</li>
+</ul>
+
+<h3>cccm launch</h3>
+<pre><code>cccm launch --hub github:owner/repo#123 [cccm options] [claude options] [prompt]
+
+cccm のオプション:
+  --hub &lt;spec&gt;             状態を書く先。v1 は github:owner/repo#number のみ（必須）
+  --env &lt;env_id&gt;           クラウドの環境 ID（--settings の remote.defaultEnvironmentId に入れる）
+  --output-format &lt;fmt&gt;    text（既定）| json（最後に結果を 1 つ）| stream-json（イベントを 1 行ずつ）
+  --ack-timeout &lt;dur&gt;               ack を待つ時間。既定 5m
+  --reminder-grace &lt;dur&gt;            起動直後にリマインダを送らない時間。既定 3m（0 で無効）
+  --pending-remind-interval &lt;dur&gt;   pending のまま再リマインドするまで。既定 15m
+  --timeout &lt;dur&gt;                   全体で待つ時間。既定なし
+  --interval &lt;dur&gt;         コメントを読む間隔。既定 10s
+  --no-wait                起動して ID と URL を出したら終わる</code></pre>
+<p>cwd の repo が作業 repo になる（claude と同じ）。</p>
+
+<h3>cccm monitor</h3>
+<pre><code>cccm monitor --hub github:owner/repo#123 [--session &lt;id&gt;] [options]
+
+  --session &lt;id&gt;   監視するセッション。省略時は Issue の中で最も新しい cccm のコメント
+  --ack-timeout / --reminder-grace / --pending-remind-interval / --timeout / --interval / --output-format は launch と同じ</code></pre>
+<p>launch の「起動」より後ろ（ack を待つ・done を待つ・リマインダ）と同じ処理。launch を <code>--no-wait</code> で起動した後に使う、または launch が途中で止められたときに続きを待つために使う。</p>
+
+<h3>cccm plugin install</h3>
+<pre><code>cccm plugin install
+
+  1. claude plugin marketplace add tomoasleep/claude-code-cloud-monitor
+  2. claude plugin install cccm@claude-code-cloud-monitor
+  3. ~/.claude/settings.json の permissions.allow に
+     mcp__claude-code-remote__add_repo と Bash(cccm report:*) を足す（既にあれば何もしない）</code></pre>
+
+<h3>出力（--output-format stream-json）</h3>
+<pre><code>{"type":"launched","session_id":"session_01…","session_url":"https://claude.ai/code/session_01…","hub":"github:owner/repo#123","comment_url":"…"}
+{"type":"ack","at":"…"}
+{"type":"progress","tasks":[{"subject":"Write tests","done":true}],"message":"…"}
+{"type":"turn_ended","turn":1,"last_message":"…"}
+{"type":"reminder","count":1}
+{"type":"pending","summary":"…"}
+{"type":"done","summary":"…","tasks":[…],"last_message":"…","session_url":"…"}</code></pre>
+<p><code>json</code> は最後の結果（<code>done</code> または失敗）だけを 1 つ出す。<code>text</code> は同じ内容を人が読む形で出す。</p>
+
+<h3>終了コード</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>コード</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>0</td><td><code>done</code>。<code>--no-wait</code> では起動できた</td></tr>
+<tr><td>1</td><td><code>failed</code></td></tr>
+<tr><td>2</td><td>引数の誤り</td></tr>
+<tr><td>3</td><td>ack が来なかった</td></tr>
+<tr><td>4</td><td><code>--timeout</code> を過ぎた</td></tr>
+<tr><td>5</td><td>起動に失敗した（セッション ID が取れない、hub のコメントを作れない）</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="report">
+<h2>6. クラウド側の cccm report <span class="tag chg">第 2 版で追加</span></h2>
+<pre><code>cccm report init     --to &lt;ref&gt;        送り先を設定し、ack を書く
+cccm report progress "&lt;message&gt;"
+cccm report pending  [--summary "…"]
+cccm report done     [--summary "…" | --summary-file &lt;path&gt;]
+cccm report failed   [--summary "…" | --summary-file &lt;path&gt;]
+cccm report hook     （hook から呼ぶ。標準入力の hook の JSON を読む）</code></pre>
+<ul>
+<li><span class="tag chg">第 4 版で変更</span> <code>init</code> の <code>--to</code>（<code>github:owner/repo/comments/123</code>）を状態ファイルに保存し、同時に ack を書く。以後の <code>report</code> と hook は、状態ファイルの送り先に書く。init の前に起きた hook の event は書かない（送り先がないため）。<code>--to</code> を他のコマンドに付けたときは、その送り先を優先する。</li>
+<li>どのコマンドも、コメントの状態を読んで更新し、全体を書き直す（<code>gh api -X PATCH</code>）。状態ファイル <code>/tmp/cccm/&lt;CLAUDE_CODE_REMOTE_SESSION_ID&gt;.json</code> を手元の写しとして持ち、コメントを読めないときもそこから書く。</li>
+<li><code>report hook</code> の event: <code>UserPromptSubmit</code>（turn を 1 増やす）、<code>TaskCreated</code> / <code>TaskCompleted</code>（TODO）、<code>Stop</code>（<code>turn_ended</code> と <code>last_message</code>）。<code>CLAUDE_CODE_REMOTE</code> が <code>true</code> でなければ、または init されていなければ何もしない。失敗しても exit 0、標準出力には何も出さない。</li>
+<li><code>report init</code> / <code>done</code> / <code>failed</code> / <code>pending</code> は、エージェントが結果を見られるよう、失敗したら exit 1 と理由を出す（hub の repo を足し忘れた 403 など）。</li>
+</ul>
+</section>
+
+<section id="state">
+<h2>7. 状態のコメントの形式</h2>
+<p>人が読む Markdown と、機械が読む状態を 1 つのコメントに入れる。状態は JSON を base64 にして HTML コメントに入れる。</p>
+<pre><code>&lt;!-- cccm-state:v1 eyJ2ZXJzaW9uIjoxLCJzdGF0dXMiOiJkb25lIi… --&gt;
+**状態**: 完了（success）
+**セッション**: https://claude.ai/code/session_01…
+**開始**: … / **更新**: …
+
+### 報告
+…（done の summary）
+
+### TODO
+- [x] Write tests
+
+## 直近の応答
+
+&lt;details&gt;
+&lt;summary&gt;全文を表示&lt;/summary&gt;
+
+…
+
+&lt;/details&gt;</code></pre>
+<p><span class="tag chg">第 4 版で変更</span> 見出し「直近の応答」は出したまま、本文だけを <code>&lt;details&gt;</code> で畳む。</p>
+<pre><code>{
+  "version": 1,
+  "session_id": "session_01…",
+  "status": "launching" | "running" | "turn_ended" | "pending" | "done" | "failed",
+  "turn": 2,
+  "acked_at": "…" | null,
+  "report": { "status": "pending" | "done" | "failed", "summary": "…", "at": "…" } | null,
+  "reminders": [{ "at": "…", "turn": 1 }],
+  "progress": [{ "at": "…", "message": "…" }],
+  "tasks": [{ "id": "1", "subject": "…", "done": true }],
+  "last_message": "…",
+  "started_at": "…", "updated_at": "…"
+}</code></pre>
+<p>文字数の上限（65536）に収めるため、<code>last_message</code>・<code>summary</code>・<code>progress</code> は長いものから切る。</p>
+</section>
+
+<section id="install">
+<h2>8. VM への導入</h2>
+<p>README で案内する、クラウドの環境の setup script:</p>
+<pre><code>#!/bin/bash
+set -eu
+npm install -g claude-code-cloud-monitor
+cccm plugin install</code></pre>
+<p><span class="tag verify">検証済み</span> 2026-11-25、実験用の環境の setup script を検証用に差し替え、dotfiles だけで起動したセッションで確かめた。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>項目</th><th>結果</th></tr></thead>
+<tbody>
+<tr><td>setup script の中の Node と npm</td><td>Node v22.23.5 と npm が <code>/opt/node22/bin</code> にある。<code>npm install -g semver</code> は、registry から取得した後、同名のコマンドが入っていたため <code>EEXIST</code> で止まった。npm の registry には出られる。別名のパッケージで入るところまでは未確認（cccm の公開後に確かめる）。</td></tr>
+<tr><td>setup script の中の <code>claude plugin</code></td><td><code>claude plugin marketplace add &lt;dir&gt;</code> と <code>claude plugin install</code> が通り、<code>claude plugin list</code> で enabled になった。setup は「Saving setup for next time」で保存された。</td></tr>
+<tr><td>その plugin の hook がセッションで発火するか</td><td>発火した。<code>UserPromptSubmit</code> が最初のプロンプトと、あとから <code>claude -p … --cloud &lt;id&gt;</code> で送ったメッセージの 2 回とも動き、<code>CLAUDE_CODE_REMOTE=true</code>、<code>CLAUDE_PLUGIN_ROOT</code> も入っていた。</td></tr>
+<tr><td><code>Bash(cccm report:*)</code> の許可</td><td>VM の settings.json に入れたら、エージェントの <code>cccm report ack …</code> が承認なしで通った。</td></tr>
+</tbody></table></div>
+<p>今回の検証では、GitHub の marketplace ではなく、VM の中に作ったディレクトリを marketplace にした。GitHub の repo からの <code>marketplace add</code> は、cccm の repo を作ってから確かめる。</p>
+</section>
+
+<section id="compare">
+<h2>9. 候補と比較</h2>
+<h3>9.1 done をどう受け取るか <span class="tag chg">第 2 版で変更</span></h3>
+<div class="table-wrap"><table>
+<thead><tr><th>候補</th><th>何が起きるか</th><th>得るもの</th><th>失うもの・未確認</th></tr></thead>
+<tbody>
+<tr><td>A. エージェントが <code>cccm report done</code>。来なければリマインダ（採用）</td><td>done は明示的。ターンの終わりは hook が hub に書くので、手元の cccm がそれを見て自動でリマインダを送る</td><td>タスクの完了と「質問で止まっただけ」を区別できる。成否と要約も届く。done が来ないことはターンの終わりごとに分かる</td><td>リマインダにも従わないエージェントは、<code>--timeout</code> まで終わらない</td></tr>
+<tr><td>B. hook の <code>Stop</code> を終わりとみなす（第 1 版）</td><td>ターンの終わりで止める</td><td>エージェントに頼らない</td><td>質問で止まっても「終わり」になる</td></tr>
+<tr><td>C. エージェントにラベルを付けさせる（claude-task-worker）</td><td>最後の操作で指示</td><td>仕組みが小さい</td><td>ターンの終わりが分からず、タイムアウトまで待つ</td></tr>
+</tbody></table></div>
+
+<h3>9.2 hub の repo を紐づける方法</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>候補</th><th>得るもの</th><th>失うもの・未確認</th></tr></thead>
+<tbody>
+<tr><td>A. エージェントが最初に <code>add_repo</code> してから ack（採用）</td><td>作業 repo と別の private な repo に書ける。実験で通った</td><td>従わないと ack が来ない → 5 分で失敗</td></tr>
+<tr><td>B. hub を作業 repo の Issue に限る</td><td>add_repo が要らない</td><td>状態と報告が作業 repo を見られる人全員に見える</td></tr>
+</tbody></table></div>
+<p>A を選んでも、hub が作業 repo と同じなら add_repo の指示は付けない。</p>
+
+<h3>9.3 状態をコメントにどう入れるか</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>候補</th><th>得るもの</th><th>失うもの</th></tr></thead>
+<tbody>
+<tr><td>A. Markdown ＋ base64 の JSON を HTML コメントに（採用）</td><td>人も機械も読める。中身でコメントが壊れない</td><td>手で編集すると状態とずれる</td></tr>
+<tr><td>B. Markdown だけ</td><td>単純</td><td>人向けの文を解析することになり壊れやすい</td></tr>
+<tr><td>C. コメントを 2 つ</td><td>分かれていて明快</td><td>書き込みが 2 回になり、片方だけ失敗しうる</td></tr>
+</tbody></table></div>
+</section>
+
+<h3>9.4 状態の変化をどう読むか（Rate Limit） <span class="tag chg">第 3 版で追加</span></h3>
+<div class="table-wrap"><table>
+<thead><tr><th>候補</th><th>得るもの</th><th>失うもの・未確認</th></tr></thead>
+<tbody>
+<tr><td>A. コメントを <code>ETag</code> の条件付きで読む（1 セッションのとき、採用）</td><td>変化がなければ 304 で、rate limit を消費しない</td><td>セッションの数だけ要求が増える（304 なので消費はしない）</td></tr>
+<tr><td>B. repo 全体のコメント一覧を <code>sort=updated&amp;since=</code> と <code>ETag</code> で読む（複数セッションのとき、採用）</td><td>1 回の要求で、同じ hub の repo の全セッションの変化が分かる</td><td>一覧の引数の docs は未読（呼び出しは 200 で通った）</td></tr>
+<tr><td>C. Issue の events API</td><td>repo 全体を 1 回で読める</td><td>コメントの編集が events に出ないので、状態の変化が分からない。使えない</td></tr>
+<tr><td>D. hook にラベルも付けさせ、events で検知する</td><td>events で変化を知れる</td><td>書き込みが増え、ラベルの付け外しが Issue の履歴を埋める</td></tr>
+</tbody></table></div>
+
+<section id="layout">
+<h2>10. リポジトリの構成とテスト</h2>
+<pre><code>package.json                     bin: cccm、依存なし（devDependencies のみ）
+src/cli.ts                       サブコマンドの振り分け、claude に渡すオプションの切り分け
+src/launch.ts / src/monitor.ts / src/wait.ts（ack・done・リマインダの待ち）
+src/report.ts                    cccm report init|progress|pending|done|failed|hook
+src/hub/github.ts                gh でコメントを作る・読む・書く
+src/state.ts                     状態の型、コメントの組み立てと解析
+src/claude.ts                    script 経由の作成、-p --output-format json での送信
+plugin/.claude-plugin/plugin.json
+plugin/hooks/hooks.json          command: cccm report hook
+.claude-plugin/marketplace.json
+docs/
+src/**/*.test.ts                 単体テスト（ソースの横に置く。herdr-symphony と同じ）
+src/test-utils/                  emulate の起動、gh の中継、偽の claude / script
+src/e2e/                         Docker の中で本物の claude を動かす e2e
+docker/e2e/Dockerfile</code></pre>
+
+<h3>テストの層 <span class="tag chg">第 5 版で変更</span></h3>
+<p>herdr-symphony の構成（ソースの横の単体テスト、<code>src/test-utils</code>、<code>src/e2e</code> と <code>docker/e2e/Dockerfile</code> で本物の claude CLI を動かし、LLM は <code>@copilotkit/aimock</code> で台本どおりに返す）に揃える。外部（GitHub と LLM）は <a href="https://github.com/vercel-labs/emulate">vercel-labs/emulate</a> で置き換える。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>層</th><th>何を動かすか</th><th>外部の置き換え</th><th>確かめること</th></tr></thead>
+<tbody>
+<tr><td>単体</td><td>状態の組み立てと解析、プロンプトの組み立て、オプションの切り分け、作成の出力からの ID 抽出、待ちの状態遷移</td><td>なし（時間は注入する）</td><td>状態は <code>--&gt;</code> や長い文でも壊れず上限で切れる。hub が別 repo のときだけ add_repo の指示が付く。ANSI を含む実物の出力から ID が取れる。ack のタイムアウト、done / failed、ターンの終わりのリマインダ、起動直後の猶予、pending の再送、全体のタイムアウト</td></tr>
+<tr><td>結合（手元側）</td><td><code>runCli(["launch", …])</code> / <code>runCli(["monitor", …])</code></td><td>GitHub: emulate の GitHub（<code>GH_HOST</code> と <code>HTTP_PROXY</code> で向ける）。<code>claude</code> と <code>script</code>: <code>CommandRunner</code> の偽物（作成の出力と <code>-p --cloud</code> の JSON を返し、引数を記録する）。時計は注入</td><td>hub のコメントの作成、状態を書き換えると出力が進む、done で終了コード 0、リマインダの送信内容</td></tr>
+<tr><td>結合（クラウド側）</td><td><code>cccm report</code> の各コマンドと <code>report hook</code></td><td>GitHub: emulate の GitHub</td><td>init で送り先が保存され ack が書かれる。以後 <code>--to</code> なしで書ける。hook はクラウド外・init 前は何もしない、失敗で exit 0、標準出力が空。init / pending / done / failed は失敗で exit 1</td></tr>
+<tr><td>e2e（Docker）</td><td>本物の claude CLI に cccm の plugin を入れ、<code>CLAUDE_CODE_REMOTE=true</code> と <code>CLAUDE_CODE_REMOTE_SESSION_ID</code> を設定して、クラウドのセッションを模す</td><td>LLM: emulate の AI（Anthropic Messages を規則どおりに返す）。GitHub: emulate の GitHub</td><td>台本（init → TaskCreate → done を出さずにターンを終える → リマインダ相当の入力 → pending → done）で、hub のコメントが期待どおりに変わる</td></tr>
+<tr><td>手動</td><td>クラウドで通し確認</td><td>なし</td><td>README の手順どおりに動く</td></tr>
+</tbody></table></div>
+
+<h3>herdr-symphony から取り入れる書き方 <span class="tag chg">第 6 版で追加</span></h3>
+<p>herdr-symphony のテストを読み、作りと書き方で取り入れるものを決めた（tomoasleep の注釈「アーキテクチャやライブラリ、書き方のパターンで学べるところを学んで欲しい」）。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>パターン</th><th>herdr-symphony での形</th><th>cccm での使い方</th></tr></thead>
+<tbody>
+<tr><td>依存は <code>deps</code> で注入し、本物を既定にする</td><td>各クラスが省略できる <code>deps</code> を受け取り、<code>??</code> で本物に落とす（AGENTS.md の「Testing &amp; Dependency Injection」）。偽物にするのは境界（<code>HerdrClient</code>・<code>CommandRunner</code>・<code>IssueTrackerClient</code>）だけ</td><td>同じ。境界は <code>CommandRunner</code>、<code>HubClient</code>、<code>CloudSessionClient</code>、ファイル、時計</td></tr>
+<tr><td>サブプロセスの境界を 1 つの型にする</td><td><code>type CommandRunner = (command, args, cwd, env?) =&gt; Promise&lt;CommandResult&gt;</code>。herdr と agmsg のクライアントが共有</td><td><code>gh</code>・<code>claude</code>・<code>script</code> の呼び出しを全部これで通す</td></tr>
+<tr><td>偽物は手書きし、呼び出しを記録する</td><td>オブジェクトリテラルで、呼ばれた引数を配列に記録し、引数の先頭で返す値を引く。状態の列（<code>[working, idle, done]</code>）を順に返し、最後を繰り返す。返す文字列は本物の組み立て関数で作る</td><td><code>gh api</code> の偽物は、コメントの状態の列を返す。作成の出力は実物の出力（ANSI 付き）を fixture にする</td></tr>
+<tr><td>待ちのループを外に出す</td><td><code>startIssue()</code> が handle を返し、<code>pollCompletion(handle)</code> は 1 歩だけ進めて <code>running</code> か <code>done</code> を返す。ループは呼び出し側</td><td><code>Watcher.poll()</code> が 1 歩だけ進め（コメントを読む、必要ならリマインダを送る）、イベントを返す。launch / monitor がループする</td></tr>
+<tr><td>時計を注入する</td><td><code>now: () =&gt; number</code> を渡し、テストは <code>currentTime += 6_000</code> で進める</td><td>同じ。<code>Date.now()</code> を直接呼ばない（herdr-symphony では一部で直接呼んでいて、そこだけテストが実時間に頼っていた）</td></tr>
+<tr><td>引数の組み立ては純粋関数にして完全一致で確かめる</td><td><code>buildGhArgs()</code> などを export し、<code>toEqual</code> で比べる</td><td><code>buildCloudCreateArgs()</code>、<code>buildReminderArgs()</code>、<code>buildPrompt()</code>、<code>splitClaudeOptions()</code></td></tr>
+<tr><td>CLI は関数として呼べるようにする</td><td><code>runCli(argv, { cwd, env, write })</code> で、プロセスを起動せずにテストする</td><td>同じ。<code>cccm report …</code> と <code>cccm launch …</code> をこの形でテストする</td></tr>
+<tr><td>e2e は Docker で本物の claude CLI を動かす</td><td>claude CLI の版を固定し、<code>~/.claude.json</code> に初回の確認を済ませた状態を書いておく。LLM の偽物に <code>ANTHROPIC_BASE_URL</code> を向ける。応答は台本（<code>respond</code> / <code>wait</code>、<code>expectedUserMessage</code> で届いた入力を確かめる）。画面は全体を snapshot し、時刻やポートは正規表現の表で置き換える</td><td>同じ構成。LLM の偽物は emulate の AI を第一候補にし、claude CLI で動かなければ herdr-symphony と同じ <code>@copilotkit/aimock</code> にする</td></tr>
+<tr><td>テストの名前と置き場所</td><td>ソースの横に <code>*.test.ts</code>、e2e は <code>*.e2e.test.ts</code>。名前は日本語で振る舞いを書く（例「pending report が指定期間内は remind を再送しない」）。CI は単体と e2e を別の job にする</td><td>同じ</td></tr>
+</tbody></table></div>
+
+<h3>GitHub を emulate に向ける方法 <span class="tag verify">検証済み</span></h3>
+<p>tomoasleep の注釈「環境変数とかで差し替えられない？」を受けて、手元で試した（2026-11-25、gh 2.105.0、emulate 0.14.0）。</p>
+<ul>
+<li><code>GH_HOST=github.localhost</code> にすると、<code>gh</code> は <code>http://api.github.localhost/…</code> を HTTP で呼ぶ（<code>/api/v3</code> は付かない）。他のホスト名だと HTTPS と <code>/api/v3</code> になる。</li>
+<li>emulate を任意のポートで起動し、<code>HTTP_PROXY=http://127.0.0.1:&lt;port&gt;</code> を足すと、その要求が emulate に届く。<code>GH_TOKEN</code> には emulate の seed の token を入れる。</li>
+<li>これで <code>gh api</code> による Issue の作成、コメントの作成、PATCH、1 件の取得、Issue ごとの一覧が emulate で通った。本番のコードは <code>gh api</code> のままでよく、テストは環境変数だけで切り替えられる。</li>
+<li>emulate で試せないもの: repo 全体のコメント一覧（<code>/repos/{o}/{r}/issues/comments</code>）は 404 が返った（Issue の番号の経路と衝突しているように見える）。<code>ETag</code> のヘッダーも返らない。この 2 つは <code>CommandRunner</code> の偽物で単体テストする。</li>
+</ul>
+<p>どのテストでも、置き換えるのは外部入出力（GitHub、LLM、<code>claude</code> と <code>script</code> の起動）だけにする。テストは Node（<code>node --test</code>）で書く（tomoasleep の回答、2026-11-25）。</p>
+</section>
+
+<section id="open">
+<h2>11. 未決の事項</h2>
+
+<p>第 5 版の Q4・Q5 は答えをもらった（Q4: 環境変数で切り替える。<code>gh api</code> のまま、<code>GH_HOST=github.localhost</code> と <code>HTTP_PROXY</code> で emulate に向けられることを確かめた。Q5: テストも Node）。今の版で新しく聞くことはない。</p>
+<details>
+<summary>第 5 版で聞いたこと（記録）</summary>
+<div class="q">
+<h3>Q4. GitHub をどう呼ぶか（emulate に向けられるようにするため）</h3>
+<p>emulate の GitHub は手元の HTTP（<code>http://localhost:4001</code>）で動く。<code>gh</code> は GitHub.com か HTTPS の Enterprise のホストにしか向けられないので、そのままでは emulate を呼べない。クラウドでは <code>gh api</code> が通ることを確かめてあるが、Node の <code>fetch</code> がクラウドのプロキシを通るか（token と <code>HTTPS_PROXY</code> の扱い）は未確認。</p>
+<ul>
+<li>本番は <code>gh api</code> のまま。テストでは、<code>gh api</code> の引数を emulate への HTTP に中継する薄い <code>gh</code> を PATH に置く</li>
+<li>Node の <code>fetch</code> で直接呼ぶ（API の URL を環境変数で切り替える）。クラウドで通るかを先に確かめる</li>
+</ul>
+<p class="rec">推奨: 本番は <code>gh api</code> のまま。クラウドで通ることを確かめた経路を変えずに、テストでは emulate の状態を持った GitHub を使える。</p>
+</div>
+
+<div class="q">
+<h3>Q5. テストの実行環境</h3>
+<p>herdr-symphony は Bun（<code>bun test</code>、Biome）。cccm は VM の Node（v22）で動かすので、実行時は Node にする。テストだけ Bun にすると、Node で動くことをテストで確かめられない。</p>
+<ul>
+<li>テストも Node（<code>node --test</code>、型の除去で TypeScript をそのまま実行）。Lint は Biome</li>
+<li>テストは Bun（herdr-symphony と同じ）</li>
+</ul>
+<p class="rec">推奨: テストも Node。</p>
+</div>
+</details>
+
+<p>第 2 版の Q1〜Q3 は答えをもらったので、決定として本文に入れた（Q1: <code>cccm launch [prompt]</code> のみ、Q2: herdr-symphony に揃える、Q3: <code>cccm send</code> は v1 に入れない）。</p>
+<details>
+<summary>第 2 版で聞いたこと（記録）</summary>
+<div class="q">
+<h3>Q1. <code>-p</code> をどう扱うか</h3>
+<p>claude では <code>-p/--print</code> が「対話なしで実行して結果を出す」。cccm launch は常に対話なしなので、<code>-p</code> は意味を持たない。claude に寄せるなら、<code>-p</code> を受け付けて無視するか、cccm を launch なしで <code>cccm -p "…" --hub …</code> と呼べる形にする手もある。</p>
+<ul>
+<li><code>cccm launch [prompt]</code> のみ。<code>-p</code> は受け付けない</li>
+<li><code>cccm launch -p "…"</code> も受け付ける（<code>-p</code> の値をプロンプトとして扱う）</li>
+<li><code>cccm -p "…" --hub …</code> で launch と同じ動きにする（claude と同じ呼び方）</li>
+</ul>
+<p class="rec">推奨: <code>cccm launch [prompt]</code> のみ。サブコマンドが複数あるので、launch を明示するほうが読み違えがない。</p>
+</div>
+
+<div class="q">
+<h3>Q2. リマインダの既定値</h3>
+<p>ターンが終わってから送るまでの時間と、送る回数の上限。短すぎると、エージェントが自分で続けるターンと重なる。</p>
+<ul>
+<li>1 分後、3 回まで</li>
+<li>3 分後、5 回まで</li>
+</ul>
+<p class="rec">推奨: 1 分後、3 回まで（送る前に、次のターンが始まっていないかを状態で確かめる）。</p>
+</div>
+
+<div class="q">
+<h3>Q3. 手元から送るリマインダ以外の操作</h3>
+<p>同じ送信の仕組みで、手元から追加の指示を送る <code>cccm send --hub … "&lt;message&gt;"</code> も作れる。claude の <code>-p --cloud &lt;id&gt;</code> を直接使えば済むので、v1 には入れない案。</p>
+<ul>
+<li>v1 には入れない</li>
+<li>v1 で <code>cccm send</code> を入れる</li>
+</ul>
+<p class="rec">推奨: v1 には入れない。</p>
+</div>
+</details>
+</section>
+
+<section id="impl">
+<h2>12. 実装者に任せること</h2>
+<ul>
+<li>引数の解析の書き方（依存なし）、時間の表記（<code>5m</code>・<code>10s</code>）の解釈。</li>
+<li><code>--output-format text</code> の見た目、エージェントへの指示とリマインダの細かい文面。</li>
+<li>長い文を切る長さ。</li>
+<li>README の構成。クラウドの通し確認の手順は必ず入れる。</li>
+</ul>
+</section>
+</main>
+</body>
+</html>

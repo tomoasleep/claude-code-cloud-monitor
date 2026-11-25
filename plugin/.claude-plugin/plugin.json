@@ -1,0 +1,6 @@
+{
+  "name": "cccm",
+  "version": "0.1.0",
+  "description": "Report Claude Code cloud session status to a GitHub issue comment with cccm",
+  "license": "MIT"
+}

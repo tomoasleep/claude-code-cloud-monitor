@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "cccm report hook" }] }],
+    "TaskCreated": [{ "hooks": [{ "type": "command", "command": "cccm report hook" }] }],
+    "TaskCompleted": [{ "hooks": [{ "type": "command", "command": "cccm report hook" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "cccm report hook" }] }]
+  }
+}

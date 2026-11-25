@@ -1,0 +1,13 @@
+{
+  "name": "claude-code-cloud-monitor",
+  "owner": {
+    "name": "tomoasleep"
+  },
+  "plugins": [
+    {
+      "name": "cccm",
+      "source": "./plugin",
+      "description": "Report Claude Code cloud session status to a GitHub issue comment with cccm"
+    }
+  ]
+}
