@@ -27,6 +27,9 @@ cccm launch ── creates comment ────▶ <!-- cccm-state:v1 … -->
 
 ## Setup
 
+> [!IMPORTANT]
+> The package is not published to npm yet. Until it is, use [Installing from source](#installing-from-source) in both places below.
+
 ### 1. Your machine
 
 ```bash
@@ -53,8 +56,10 @@ cccm plugin install
 > [!NOTE]
 > As of November 2026, `add_repo` may still ask for approval in the session ("This connector call requires your approval to proceed.") even with the permission above, and the session waits until someone approves it on claude.ai. If you need unattended runs, put the hub issue in the repository the session works on, so that `add_repo` is not needed.
 
+### Installing from source
+
 <details>
-<summary>Installing from source instead of npm</summary>
+<summary>Show the steps</summary>
 
 `npm install -g github:tomoasleep/claude-code-cloud-monitor` does not work, because npm does not install the dev dependencies needed for the build when installing a git dependency globally. Build a tarball instead:
 
