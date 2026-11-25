@@ -62,6 +62,7 @@ ol.flow > li { margin-bottom: 6px; }
 <li>hub の repo が作業 repo と違うかを cccm が判定して <code>add_repo</code> の指示を足すのはやめた。repo の紐づけ（routine の repo、プロンプトでの指示、環境の許可）はユーザーが用意する。足りなければ ack が来ず、<code>--ack-timeout</code> で失敗する（4 章、9.2）。</li>
 <li><code>cccm plugin install</code> は <code>mcp__claude-code-remote__add_repo</code> を許可に足さない（cccm が add_repo を使わなくなったため）。</li>
 <li>VM の settings.json で許可しても、<code>add_repo</code> が claude.ai 側の承認を求めるようになったことを確かめた（2 章）。</li>
+<li>routine は名前付きの profile として <code>~/.config/cccm/routines.toml</code> に保存し、<code>cccm routine add</code> で登録する。profile は画面の fire URL と、token を標準出力に出す <code>token_command</code> だけを持ち、token を平文で書かない（tomoasleep の決定、2026-11-25「設定に token 平書きするのちょっと抵抗がある」）。trigger の ID から fire URL を組み立てることはしない（5 章）。</li>
 </ul>
 </div>
 
@@ -232,13 +233,13 @@ then continue.</code></pre>
 
 <h3>cccm launch <span class="tag chg">第 7 版で変更</span></h3>
 <pre><code>cccm launch --via cloud   --hub github:owner/repo#123 [cccm options] [claude options] [prompt]
-cccm launch --via routine --routine &lt;trig_id&gt; --hub github:owner/repo#123 [cccm options] [prompt]
+cccm launch --via routine --routine &lt;name&gt; --hub github:owner/repo#123 [cccm options] [prompt]
 
 cccm のオプション:
   --via &lt;cloud|routine&gt;    起動方式（必須。既定はない）
   --hub &lt;spec&gt;             状態を書く先。v1 は github:owner/repo#number のみ（必須）
   --env &lt;env_id&gt;           クラウドの環境 ID（--via cloud のみ。--settings の remote.defaultEnvironmentId に入れる）
-  --routine &lt;trig_id&gt;      fire する routine（--via routine のみ、必須）
+  --routine &lt;name&gt;         fire する routine の profile 名（--via routine のみ。環境変数で渡すときは不要）
   --output-format &lt;fmt&gt;    text（既定）| json（最後に結果を 1 つ）| stream-json（イベントを 1 行ずつ）
   --ack-timeout &lt;dur&gt;               ack を待つ時間。既定 5m
   --reminder-grace &lt;dur&gt;            起動直後にリマインダを送らない時間。既定 3m（0 で無効）
@@ -248,7 +249,9 @@ cccm のオプション:
   --no-wait                起動して ID と URL を出したら終わる</code></pre>
 <p><code>--via cloud</code> では cwd の repo が作業 repo になる（claude と同じ）。</p>
 <ul>
-<li><span class="tag chg">第 7 版で追加</span> routine の token は環境変数 <code>CCCM_ROUTINE_TOKEN</code> で受け取る（引数にすると shell の履歴やプロセス一覧に残るため）。token は routine ごとなので、複数の routine を使う呼び出し側（symphony など）は呼び出しごとに環境変数を替える。<code>--via routine</code> で token がなければ引数の誤り（終了コード 2）。</li>
+<li><span class="tag chg">第 7 版で追加</span> fire の URL と token は、<code>--routine &lt;name&gt;</code> で選んだ profile（下の「cccm routine add」）から取る。cccm は起動のたびに profile の <code>token_command</code> を <code>sh -c</code> で実行し、標準出力（前後の空白を除く）を token にする。<code>token_command</code> が 0 以外で終わるか何も出さなければ、fire せずに終了コード 5。</li>
+<li>環境変数 <code>CCCM_ROUTINE_FIRE_URL</code> と <code>CCCM_ROUTINE_TOKEN</code> があれば、それぞれ profile より優先する。両方あれば <code>--routine</code> は要らない。URL も token の取り方もなければ引数の誤り（終了コード 2）。存在しない profile 名も終了コード 2。</li>
+<li>fire の URL はユーザーが渡したものだけを使う。trigger の ID から URL を組み立てない。cccm はキーチェーンなどの秘密の保管先を自分では読み書きしない（読むのは <code>token_command</code> の役目）。</li>
 <li><code>--via routine</code> では <code>--env</code> と claude に渡すオプション（<code>--model</code> など）は使えない（routine の定義で決まるため）。渡されたら引数の誤り。</li>
 <li>fire が 2xx 以外を返したら、応答の <code>error.message</code> を出して終了コード 5。fire は冪等でないので、cccm は再試行しない。</li>
 <li>リマインダは <code>--via</code> に関わらず <code>claude -p … --cloud &lt;session_id&gt;</code> で送る（routine のセッションに送れるかは通し確認で確かめる）。</li>
@@ -269,6 +272,20 @@ cccm のオプション:
   3. ~/.claude/settings.json の permissions.allow に
      Bash(cccm report:*) を足す（既にあれば何もしない）</code></pre>
 <p><span class="tag chg">第 7 版で変更</span> <code>mcp__claude-code-remote__add_repo</code> は足さない。</p>
+
+<h3>cccm routine add <span class="tag chg">第 7 版で追加</span></h3>
+<pre><code>cccm routine add &lt;name&gt; --fire-url &lt;url&gt; --token-command &lt;command&gt;
+
+  &lt;name&gt;                   profile 名（英数字・-・_）。同じ名前があれば置き換える
+  --fire-url &lt;url&gt;         routine の画面（API trigger）に出ている fire URL をそのまま
+  --token-command &lt;cmd&gt;    token を標準出力に出すコマンド。例:
+                             security find-generic-password -s cccm-my-hub -w   （macOS のキーチェーン）
+                             op read op://vault/cccm/token                        （1Password）
+                             secret-tool lookup service cccm-my-hub               （libsecret）</code></pre>
+<p>保存先は <code>$XDG_CONFIG_HOME/cccm/routines.toml</code>（未設定なら <code>~/.config/cccm/routines.toml</code>）。TOML の一部だけを使う（profile ごとの表と、<code>fire_url</code>・<code>token_command</code> の 2 つの文字列）。依存を増やさないため、読み書きは cccm の中で行う。</p>
+<pre><code>[my-hub]
+fire_url = "https://api.anthropic.com/v1/claude_code/routines/trig_…/fire"
+token_command = "security find-generic-password -s cccm-my-hub -w"</code></pre>
 
 <h3>出力（--output-format stream-json）</h3>
 <pre><code>{"type":"launched","session_id":"session_01…","session_url":"https://claude.ai/code/session_01…","hub":"github:owner/repo#123","comment_url":"…"}
@@ -417,7 +434,8 @@ src/report.ts                    cccm report init|progress|pending|done|failed|h
 src/hub/github.ts                gh でコメントを作る・読む・書く
 src/state.ts                     状態の型、コメントの組み立てと解析
 src/claude.ts                    script 経由の作成、-p --output-format json での送信
-src/routine.ts                   routine の fire API の呼び出し（第 7 版で追加。fetch を注入する）
+src/routine.ts                   routine の fire API の呼び出しと token_command の実行（第 7 版で追加。fetch と CommandRunner を注入する）
+src/routine-config.ts            routine の profile（routines.toml）の読み書き（第 7 版で追加）
 plugin/.claude-plugin/plugin.json
 plugin/hooks/hooks.json          command: cccm report hook
 .claude-plugin/marketplace.json

@@ -17,6 +17,7 @@ const CREATE_OUTPUT = await readFile(
   "utf8",
 )
 const START = Date.parse("2026-11-25T00:00:00.000Z")
+const FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/trig_01x/fire"
 
 let emu: Emulator
 before(async () => {
@@ -38,6 +39,7 @@ async function makeDeps(overrides: Partial<CliDeps> = {}) {
     if (command === "gh") return runCommand(command, args, options)
     calls.push({ command, args })
     if (command === "script") return { exitCode: 0, stdout: CREATE_OUTPUT, stderr: "" }
+    if (command === "sh") return { exitCode: 0, stdout: "sk-ant-oat01-from-command\n", stderr: "" }
     if (command === "claude") {
       return {
         exitCode: 0,
@@ -58,9 +60,10 @@ async function makeDeps(overrides: Partial<CliDeps> = {}) {
       }),
     )
   }) as typeof globalThis.fetch
+  const configHome = await mkdtemp(join(tmpdir(), "cccm-config-"))
   const deps: CliDeps = {
     cwd: "/work",
-    env: emu.env,
+    env: { ...emu.env, XDG_CONFIG_HOME: configHome },
     write: (s) => out.push(s),
     writeErr: (s) => err.push(s),
     readStdin: async () => "",
@@ -334,34 +337,37 @@ describe("cccm launch", () => {
 
   test("routine の指定が足りないか、routine では使えないオプションがあれば終了コード 2", async () => {
     const t = await makeDeps()
-    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: "sk-ant-oat01-t" }
+    await runCli(
+      ["routine", "add", "qa", "--fire-url", FIRE_URL, "--token-command", "print-token"],
+      t.deps,
+    )
     const base = ["launch", "--via", "routine", "--hub", "github:o/r#1"]
     assert.equal(await runCli([...base, "task"], t.deps), 2)
-    assert.equal(
-      await runCli([...base, "--routine", "trig_1", "--model", "opus", "task"], t.deps),
-      2,
-    )
-    assert.equal(
-      await runCli([...base, "--routine", "trig_1", "--env", "env_1", "task"], t.deps),
-      2,
-    )
+    assert.equal(await runCli([...base, "--routine", "missing", "task"], t.deps), 2)
+    assert.match(t.err.join(""), /no routine named missing/)
+    assert.equal(await runCli([...base, "--routine", "qa", "--model", "opus", "task"], t.deps), 2)
+    assert.equal(await runCli([...base, "--routine", "qa", "--env", "env_1", "task"], t.deps), 2)
     assert.equal(
       await runCli(
-        ["launch", "--via", "cloud", "--hub", "github:o/r#1", "--routine", "trig_1", "task"],
+        ["launch", "--via", "cloud", "--hub", "github:o/r#1", "--routine", "qa", "task"],
         t.deps,
       ),
       2,
     )
-    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: undefined }
-    assert.equal(await runCli([...base, "--routine", "trig_1", "task"], t.deps), 2)
-    assert.match(t.err.join(""), /CCCM_ROUTINE_TOKEN/)
     assert.deepEqual(t.fires, [])
   })
 
-  test("--via routine なら routine を fire し、プロンプトを text で渡して待つ", async () => {
+  test("--via routine なら profile の token_command で token を取り、fire_url に fire して待つ", async () => {
     const issue = await emu.createIssue()
     const t = await makeDeps()
-    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: "sk-ant-oat01-t" }
+    assert.equal(
+      await runCli(
+        ["routine", "add", "qa", "--fire-url", FIRE_URL, "--token-command", "print-token"],
+        t.deps,
+      ),
+      0,
+    )
+    t.out.length = 0
     t.deps.sleep = async (ms) => {
       t.advance(ms)
       const text = JSON.parse(String(t.fires[0].init.body)).text as string
@@ -376,7 +382,7 @@ describe("cccm launch", () => {
         "--via",
         "routine",
         "--routine",
-        "trig_01x",
+        "qa",
         "--hub",
         `github:${OWNER}/${HUB_REPO}#${issue}`,
         "--output-format",
@@ -388,12 +394,87 @@ describe("cccm launch", () => {
     assert.equal(code, 0, t.err.join(""))
     assert.equal(JSON.parse(t.out.join("")).summary, "ok")
     assert.equal(t.fires.length, 1)
-    assert.equal(t.fires[0].url, "https://api.anthropic.com/v1/claude_code/routines/trig_01x/fire")
+    assert.equal(t.fires[0].url, FIRE_URL)
+    assert.equal(
+      (t.fires[0].init.headers as Record<string, string>).authorization,
+      "Bearer sk-ant-oat01-from-command",
+    )
     assert.match(JSON.parse(String(t.fires[0].init.body)).text, /^fix the bug\n/)
+    assert.deepEqual(
+      t.calls.filter((c) => c.command === "sh").map((c) => c.args),
+      [["-c", "print-token"]],
+    )
     assert.deepEqual(
       t.calls.filter((c) => c.command === "script"),
       [],
     )
+  })
+
+  test("CCCM_ROUTINE_FIRE_URL と CCCM_ROUTINE_TOKEN があれば profile より優先する", async () => {
+    const issue = await emu.createIssue()
+    const t = await makeDeps()
+    await runCli(
+      ["routine", "add", "qa", "--fire-url", FIRE_URL, "--token-command", "print-token"],
+      t.deps,
+    )
+    t.deps.env = {
+      ...t.deps.env,
+      CCCM_ROUTINE_FIRE_URL: "https://example.test/fire",
+      CCCM_ROUTINE_TOKEN: "sk-ant-oat01-env",
+    }
+    const hub = `github:${OWNER}/${HUB_REPO}#${issue}`
+    assert.equal(
+      await runCli(
+        ["launch", "--via", "routine", "--routine", "qa", "--hub", hub, "--no-wait", "task"],
+        t.deps,
+      ),
+      0,
+    )
+    assert.equal(
+      await runCli(["launch", "--via", "routine", "--hub", hub, "--no-wait", "task"], t.deps),
+      0,
+    )
+    assert.deepEqual(
+      t.fires.map((f) => [f.url, (f.init.headers as Record<string, string>).authorization]),
+      [
+        ["https://example.test/fire", "Bearer sk-ant-oat01-env"],
+        ["https://example.test/fire", "Bearer sk-ant-oat01-env"],
+      ],
+    )
+    assert.deepEqual(
+      t.calls.filter((c) => c.command === "sh"),
+      [],
+    )
+  })
+
+  test("token_command が失敗したら終了コード 5 で、fire しない", async () => {
+    const issue = await emu.createIssue()
+    const t = await makeDeps()
+    const base = t.deps.runner
+    t.deps.runner = async (command, args, options) =>
+      command === "sh"
+        ? { exitCode: 44, stdout: "", stderr: "item not found" }
+        : base(command, args, options)
+    await runCli(
+      ["routine", "add", "qa", "--fire-url", FIRE_URL, "--token-command", "print-token"],
+      t.deps,
+    )
+    const code = await runCli(
+      [
+        "launch",
+        "--via",
+        "routine",
+        "--routine",
+        "qa",
+        "--hub",
+        `github:${OWNER}/${HUB_REPO}#${issue}`,
+        "task",
+      ],
+      t.deps,
+    )
+    assert.equal(code, 5)
+    assert.match(t.err.join(""), /item not found/)
+    assert.deepEqual(t.fires, [])
   })
 
   test("routine の fire が失敗したら終了コード 5", async () => {
@@ -408,22 +489,47 @@ describe("cccm launch", () => {
           { status: 404 },
         )) as typeof globalThis.fetch,
     })
-    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_TOKEN: "sk-ant-oat01-t" }
+    t.deps.env = { ...t.deps.env, CCCM_ROUTINE_FIRE_URL: FIRE_URL, CCCM_ROUTINE_TOKEN: "t" }
     const code = await runCli(
-      [
-        "launch",
-        "--via",
-        "routine",
-        "--routine",
-        "trig_x",
-        "--hub",
-        `github:${OWNER}/${HUB_REPO}#${issue}`,
-        "task",
-      ],
+      ["launch", "--via", "routine", "--hub", `github:${OWNER}/${HUB_REPO}#${issue}`, "task"],
       t.deps,
     )
     assert.equal(code, 5)
     assert.match(t.err.join(""), /404 not_found_error: no routine/)
+  })
+})
+
+describe("cccm routine add", () => {
+  test("profile を routines.toml に保存する", async () => {
+    const t = await makeDeps()
+    const code = await runCli(
+      [
+        "routine",
+        "add",
+        "qa",
+        "--fire-url",
+        FIRE_URL,
+        "--token-command",
+        "op read op://v/cccm/token",
+      ],
+      t.deps,
+    )
+    assert.equal(code, 0, t.err.join(""))
+    assert.equal(
+      await readFile(join(t.deps.env.XDG_CONFIG_HOME!, "cccm", "routines.toml"), "utf8"),
+      `[qa]\nfire_url = "${FIRE_URL}"\ntoken_command = "op read op://v/cccm/token"\n`,
+    )
+  })
+
+  test("名前・--fire-url・--token-command のどれかがなければ終了コード 2", async () => {
+    const t = await makeDeps()
+    assert.equal(
+      await runCli(["routine", "add", "--fire-url", FIRE_URL, "--token-command", "c"], t.deps),
+      2,
+    )
+    assert.equal(await runCli(["routine", "add", "qa", "--token-command", "c"], t.deps), 2)
+    assert.equal(await runCli(["routine", "add", "qa", "--fire-url", FIRE_URL], t.deps), 2)
+    assert.equal(await runCli(["routine", "remove", "qa"], t.deps), 2)
   })
 })
 

@@ -14,14 +14,18 @@ function makeFetch(status: number, body: unknown) {
 }
 
 describe("fireRoutine", () => {
-  test("routine の fire API に token と text を送り、セッション ID と URL を返す", async () => {
+  test("渡された fire URL に token と text を送り、セッション ID と URL を返す", async () => {
     const { fetch, calls } = makeFetch(200, {
       type: "routine_fire",
       claude_code_session_id: "session_01abc",
       claude_code_session_url: "https://claude.ai/code/session_01abc",
     })
     const result = await fireRoutine(
-      { routineId: "trig_01x", token: "sk-ant-oat01-t", text: "do it" },
+      {
+        fireUrl: "https://api.anthropic.com/v1/claude_code/routines/trig_01x/fire",
+        token: "sk-ant-oat01-t",
+        text: "do it",
+      },
       fetch,
     )
 
@@ -47,7 +51,7 @@ describe("fireRoutine", () => {
       error: { type: "authentication_error", message: "token does not match this routine" },
     })
     await assert.rejects(
-      fireRoutine({ routineId: "trig_01x", token: "bad", text: "x" }, fetch),
+      fireRoutine({ fireUrl: "https://example.test/fire", token: "bad", text: "x" }, fetch),
       /401 authentication_error: token does not match this routine/,
     )
   })

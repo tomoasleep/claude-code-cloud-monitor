@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parseArgs } from "node:util"
 import { createCloudSessionClient } from "./claude.ts"
 import { type CommandRunner, runCommand } from "./command.ts"
 import { parseDuration } from "./duration.ts"
@@ -10,6 +11,7 @@ import { splitClaudeOptions } from "./options.ts"
 import { createReporter, OUTPUT_FORMATS, type OutputFormat } from "./output.ts"
 import { installPlugin } from "./plugin.ts"
 import { runReport } from "./report.ts"
+import { addRoutine, type RoutineProfile, readRoutines, routinesPath } from "./routine-config.ts"
 import { EXIT } from "./wait.ts"
 
 export type CliDeps = {
@@ -29,14 +31,16 @@ export type CliDeps = {
 
 const USAGE = `Usage:
   cccm launch  --via cloud --hub github:owner/repo#number [cccm options] [claude options] [prompt]
-  cccm launch  --via routine --routine <trig_id> --hub github:owner/repo#number [cccm options] [prompt]
+  cccm launch  --via routine --routine <name> --hub github:owner/repo#number [cccm options] [prompt]
   cccm monitor --hub github:owner/repo#number [--session <id>] [cccm options]
+  cccm routine add <name> --fire-url <url> --token-command <command>
   cccm plugin install
   cccm report init|progress|pending|done|failed|hook ...
 
 cccm options:
   --via <cloud|routine>            How to start the session (launch only, required)
-  --routine <trig_id>              Routine to fire (--via routine). The token is read from CCCM_ROUTINE_TOKEN
+  --routine <name>                 Routine profile to fire (--via routine; see cccm routine add).
+                                   CCCM_ROUTINE_FIRE_URL and CCCM_ROUTINE_TOKEN override the profile
   --hub <spec>                     Where to write the status (github:owner/repo#number)
   --env <env_id>                   Cloud environment ID (--via cloud)
   --output-format <fmt>            text (default) | json | stream-json
@@ -62,6 +66,8 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         return await monitor(rest, deps)
       case "report":
         return await runReport(rest, { ...deps, hub: createGitHubHub(deps) })
+      case "routine":
+        return await routine(rest, deps)
       case "plugin":
         if (rest[0] !== "install") throw new UsageError("unknown plugin command")
         await installPlugin(deps)
@@ -145,7 +151,7 @@ async function launch(argv: string[], deps: CliDeps): Promise<number> {
       hubSpec,
       issue,
       prompt,
-      via: parseVia(split, value, deps.env),
+      via: await parseVia(split, value, deps.env),
       noWait: split.cccm["no-wait"] === true,
       timings,
     },
@@ -156,11 +162,11 @@ async function launch(argv: string[], deps: CliDeps): Promise<number> {
   return code
 }
 
-function parseVia(
+async function parseVia(
   split: ReturnType<typeof splitClaudeOptions>,
   value: (name: string) => string | undefined,
   env: CliDeps["env"],
-): LaunchVia {
+): Promise<LaunchVia> {
   const via = value("via")
   if (via === "cloud") {
     if (value("routine")) throw new UsageError("--routine is only for --via routine")
@@ -172,19 +178,57 @@ function parseVia(
     }
   }
   if (via === "routine") {
-    const routineId = value("routine")
-    if (!routineId) throw new UsageError("--via routine requires --routine <trig_id>")
     if (value("env") || split.settings || split.claude.length > 0) {
       throw new UsageError(
         "--via routine does not take --env or claude options; the routine definition decides them",
       )
     }
-    const token = env.CCCM_ROUTINE_TOKEN
-    if (!token)
-      throw new UsageError("--via routine requires the routine token in CCCM_ROUTINE_TOKEN")
-    return { kind: "routine", routineId, token }
+    const name = value("routine")
+    let profile: RoutineProfile | undefined
+    if (name) {
+      profile = (await readRoutines(env))[name]
+      if (!profile) throw new UsageError(`no routine named ${name} in ${routinesPath(env)}`)
+    }
+    const fireUrl = env.CCCM_ROUTINE_FIRE_URL ?? profile?.fire_url
+    const token = env.CCCM_ROUTINE_TOKEN ?? null
+    const tokenCommand = profile?.token_command ?? null
+    if (!fireUrl || (!token && !tokenCommand)) {
+      throw new UsageError(
+        "--via routine requires --routine <name>, or CCCM_ROUTINE_FIRE_URL and CCCM_ROUTINE_TOKEN",
+      )
+    }
+    return { kind: "routine", fireUrl, token, tokenCommand }
   }
   throw new UsageError(via ? `unknown --via: ${via}` : "--via cloud|routine is required")
+}
+
+function parseRoutineAddArgs(args: string[]) {
+  try {
+    return parseArgs({
+      args,
+      options: { "fire-url": { type: "string" }, "token-command": { type: "string" } },
+      allowPositionals: true,
+    })
+  } catch (error) {
+    throw new UsageError((error as Error).message)
+  }
+}
+
+async function routine(argv: string[], deps: CliDeps): Promise<number> {
+  const [subcommand, ...rest] = argv
+  if (subcommand !== "add") throw new UsageError("unknown routine command")
+  const { values, positionals } = parseRoutineAddArgs(rest)
+  const [name] = positionals
+  const fireUrl = values["fire-url"]
+  const tokenCommand = values["token-command"]
+  if (!name || !fireUrl || !tokenCommand || positionals.length > 1) {
+    throw new UsageError(
+      "usage: cccm routine add <name> --fire-url <url> --token-command <command>",
+    )
+  }
+  const path = await addRoutine(deps.env, name, { fire_url: fireUrl, token_command: tokenCommand })
+  deps.write(`Saved routine ${name} to ${path}\n`)
+  return 0
 }
 
 async function monitor(argv: string[], deps: CliDeps): Promise<number> {

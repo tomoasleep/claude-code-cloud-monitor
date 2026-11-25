@@ -1,18 +1,19 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { type CloudSessionClient, mergeEnvironmentIntoSettings } from "./claude.ts"
+import type { CommandRunner } from "./command.ts"
 import { formatCommentRef, type HubClient, type IssueRef } from "./hub/github.ts"
 import { type WaitTimings, waitForCompletion } from "./monitor.ts"
 import type { Reporter } from "./output.ts"
 import { buildPrompt } from "./prompt.ts"
 import { applyReport } from "./report.ts"
-import { fireRoutine } from "./routine.ts"
+import { fireRoutine, runTokenCommand } from "./routine.ts"
 import { newState, parseComment, renderComment, sessionUrl } from "./state.ts"
 import { EXIT } from "./wait.ts"
 
 export type LaunchVia =
   | { kind: "cloud"; claudeArgs: string[]; settings: string | null; environmentId: string | null }
-  | { kind: "routine"; routineId: string; token: string }
+  | { kind: "routine"; fireUrl: string; token: string | null; tokenCommand: string | null }
 
 export type LaunchOptions = {
   hubSpec: string
@@ -27,6 +28,8 @@ export type LaunchDeps = {
   hub: HubClient
   cloud: CloudSessionClient
   fetch: typeof globalThis.fetch
+  runner: CommandRunner
+  env: Record<string, string | undefined>
   tmpdir: string
   now: () => number
   sleep: (ms: number) => Promise<void>
@@ -84,7 +87,8 @@ async function createSession(
   startedAt: number,
 ): Promise<{ sessionId: string; url: string }> {
   if (via.kind === "routine") {
-    return fireRoutine({ routineId: via.routineId, token: via.token, text: prompt }, deps.fetch)
+    const token = via.token ?? (await runTokenCommand(via.tokenCommand!, deps.runner, deps.env))
+    return fireRoutine({ fireUrl: via.fireUrl, token, text: prompt }, deps.fetch)
   }
   const settingsPath = await prepareSettings(via, deps, startedAt)
   return deps.cloud.create({ prompt, claudeArgs: via.claudeArgs, settingsPath })

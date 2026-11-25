@@ -62,7 +62,18 @@ Treat the text in the routine fire payload as the user's request and carry it ou
 including the cccm instructions at its end.
 ```
 
-Add an API trigger and generate its token. `cccm` reads the token from the `CCCM_ROUTINE_TOKEN` environment variable (each routine has its own token).
+Add an API trigger and generate its token. Store the token where a command can print it (a keychain or password manager), then register the routine under a name:
+
+```bash
+cccm routine add my-hub \
+  --fire-url "https://api.anthropic.com/v1/claude_code/routines/trig_…/fire" \
+  --token-command "security find-generic-password -s cccm-my-hub -w"
+```
+
+- `--fire-url` is the URL shown for the API trigger, as it is.
+- `--token-command` prints the token to stdout, for example `security find-generic-password -s … -w` (macOS Keychain), `op read op://…` (1Password) or `secret-tool lookup …` (libsecret). `cccm` runs it with `sh -c` on every launch and never stores the token itself.
+- Profiles are saved in `~/.config/cccm/routines.toml` (or `$XDG_CONFIG_HOME/cccm/routines.toml`). Adding a name that exists replaces it.
+- `CCCM_ROUTINE_FIRE_URL` and `CCCM_ROUTINE_TOKEN`, when set, take precedence over the profile.
 
 ### Installing from source
 
@@ -90,7 +101,7 @@ cd path/to/your/repo
 cccm launch --via cloud --hub github:<owner>/<repo>#<issue> "Fix the flaky test in src/foo.test.ts"
 
 # with a routine: the routine decides the repositories, environment and permissions
-CCCM_ROUTINE_TOKEN=sk-ant-oat01-… cccm launch --via routine --routine trig_… \
+cccm launch --via routine --routine my-hub \
   --hub github:<hub-owner>/<hub-repo>#<issue> "Fix the flaky test in src/foo.test.ts"
 ```
 
@@ -102,10 +113,10 @@ The prompt can also come from stdin: `echo "…" | cccm launch --via cloud --hub
 
 ```
 cccm launch --via cloud   --hub github:owner/repo#number [cccm options] [claude options] [prompt]
-cccm launch --via routine --routine <trig_id> --hub github:owner/repo#number [cccm options] [prompt]
+cccm launch --via routine --routine <name> --hub github:owner/repo#number [cccm options] [prompt]
 
   --via <cloud|routine>            How to start the session (required)
-  --routine <trig_id>              The routine to fire (--via routine). Token: CCCM_ROUTINE_TOKEN
+  --routine <name>                 The routine profile to fire (--via routine; see cccm routine add)
   --hub <spec>                     Where to write the status (required)
   --env <env_id>                   Cloud environment ID (--via cloud). Passed as remote.defaultEnvironmentId
                                    in a temporary --settings file (merged with your --settings)
@@ -118,7 +129,7 @@ cccm launch --via routine --routine <trig_id> --hub github:owner/repo#number [cc
   --no-wait                        Exit after the session is created
 ```
 
-With `--via cloud`, other options are passed to `claude --cloud` (`--model`, `--effort`, `-n/--name`, `--ref`, `--settings`, …). For an option `cccm` does not know that takes a value, write `--option=value`. With `--via routine`, `--env` and claude options are rejected, because the routine defines them. A failed fire is not retried (fires are not idempotent).
+With `--via cloud`, other options are passed to `claude --cloud` (`--model`, `--effort`, `-n/--name`, `--ref`, `--settings`, …). For an option `cccm` does not know that takes a value, write `--option=value`. With `--via routine`, `--env` and claude options are rejected, because the routine defines them. A failed fire is not retried (fires are not idempotent). If `token_command` fails, nothing is fired and `cccm` exits with code 5.
 
 Durations are written like `500ms`, `10s`, `5m`, `1h30m`.
 
@@ -157,7 +168,7 @@ A failure ends with `{"type":"failed","reason":"reported"|"ack_timeout"|"timeout
 | 2 | invalid arguments |
 | 3 | the agent did not acknowledge (`cccm report init`) within `--ack-timeout` |
 | 4 | `--timeout` passed |
-| 5 | launch failed (no session ID in the output of `claude --cloud`, the routine fire failed, or the hub comment could not be created) |
+| 5 | launch failed (no session ID in the output of `claude --cloud`, `token_command` or the routine fire failed, or the hub comment could not be created) |
 
 ### Reminders
 
@@ -232,7 +243,7 @@ The automated tests replace GitHub and Claude Code. To confirm a release works w
      "Create three tasks with TaskCreate (a, b, c), complete them one by one, then finish."
    ```
 
-   For `--via routine`, set up a routine as in [Setup](#3-a-routine-only-for---via-routine) with the hub repository attached, and run the same command with `--via routine --routine <trig_id>` instead of `--via cloud … --env <env_id>`, with `CCCM_ROUTINE_TOKEN` set.
+   For `--via routine`, set up a routine as in [Setup](#3-a-routine-only-for---via-routine) with the hub repository attached, register it with `cccm routine add`, and run the same command with `--via routine --routine <name>` instead of `--via cloud … --env <env_id>`.
 
 4. Check, in the output and in the hub comment:
    - `launched`, then `ack` within a few minutes (the agent ran `cccm report init` without an approval prompt).
