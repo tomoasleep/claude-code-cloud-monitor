@@ -270,6 +270,17 @@ npm run test:e2e         # runs the real claude CLI with the cccm plugin in Dock
 
 - The e2e test (`src/e2e/`) runs the real `claude` CLI in Docker with the plugin installed from this repository, `CLAUDE_CODE_REMOTE=true` set to imitate a cloud session, and [aimock](https://github.com/CopilotKit/aimock) answering as the model from a script: `init` → a turn that ends without a report → the reminder → `pending` → `done`. Task hooks are not part of it, because the `TaskCreate` tool is not available to the CLI in that setup; they are covered by the integration tests and the cloud check above.
 
+### Releasing
+
+Releases are published to npm from GitHub Actions with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (`.github/workflows/publish.yml`), so no npm token is stored in the repository. Bump `version` in `package.json`, commit, and push a tag that matches it:
+
+```bash
+npm version patch   # updates package.json and creates the tag v<version>
+git push origin main --follow-tags
+```
+
+The workflow fails if the tag does not match `package.json`. Provenance is attached automatically because the repository is public.
+
 See [docs/design.html](docs/design.html) for the design.
 
 ## License
