@@ -1,0 +1,4 @@
+[?25l[2K[1G[32m✓[39m Created cloud session: [1msession_01TestSessionId0000000000[22m
+  View: [4mhttps://claude.ai/code/session_01TestSessionId0000000000[24m
+  Resume with: claude --teleport session_01TestSessionId0000000000
+[?25h
