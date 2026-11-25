@@ -24,14 +24,16 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "test": "node --test \"src/**/*.test.ts\"",
-    "test:e2e": "node --test \"src/e2e/**/*.e2e.test.ts\"",
+    "test:e2e": "npm run build && docker run --rm -e CCCM_E2E=1 -v \"$PWD\":/workspace cccm-e2e:latest node --test \"src/e2e/*.e2e.test.ts\"",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint .",
     "check": "biome check .",
-    "check:fix": "biome check --write ."
+    "check:fix": "biome check --write .",
+    "test:e2e:build": "docker build -t cccm-e2e:latest -f docker/e2e/Dockerfile ."
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.9",
+    "@copilotkit/aimock": "^1.48.1",
     "@types/node": "^22.20.5",
     "emulate": "^0.14.0",
     "typescript": "^7.0.2"

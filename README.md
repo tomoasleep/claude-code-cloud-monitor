@@ -222,11 +222,16 @@ npm test          # unit and integration tests (node --test)
 npm run typecheck
 npm run check     # Biome
 npm run build
+
+npm run test:e2e:build   # once: image with a pinned Claude Code CLI
+npm run test:e2e         # runs the real claude CLI with the cccm plugin in Docker
 ```
 
 - Tests sit next to the source (`src/**/*.test.ts`) and run with Node's type stripping.
 - Collaborators that cross a process or network boundary (`gh`, `claude`, `script`, the clock) are injected through `deps`; everything else runs for real.
 - Integration tests point `gh` at the GitHub emulator of [emulate](https://github.com/vercel-labs/emulate) with `GH_HOST=github.localhost`, `HTTP_PROXY=http://127.0.0.1:<port>` and the token from the seed. The repository-wide comment list and ETags are not supported by the emulator, so they are covered by unit tests with a fake command runner.
+
+- The e2e test (`src/e2e/`) runs the real `claude` CLI in Docker with the plugin installed from this repository, `CLAUDE_CODE_REMOTE=true` set to imitate a cloud session, and [aimock](https://github.com/CopilotKit/aimock) answering as the model from a script: `init` → a turn that ends without a report → the reminder → `pending` → `done`. Task hooks are not part of it, because the `TaskCreate` tool is not available to the CLI in that setup; they are covered by the integration tests and the cloud check above.
 
 See [docs/design.html](docs/design.html) for the design.
 
