@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-cloud-monitor",
+  "name": "@tomoasleep/claude-code-cloud-monitor",
   "version": "0.1.0",
   "description": "Launch Claude Code cloud sessions from your terminal and monitor them through a GitHub issue comment",
   "license": "MIT",
@@ -19,6 +19,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tomoasleep/claude-code-cloud-monitor.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

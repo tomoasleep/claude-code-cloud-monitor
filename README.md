@@ -33,7 +33,7 @@ cccm launch ── creates comment ────▶ <!-- cccm-state:v1 … -->
 ### 1. Your machine
 
 ```bash
-npm install -g claude-code-cloud-monitor
+npm install -g @tomoasleep/claude-code-cloud-monitor
 ```
 
 ### 2. The cloud environment
@@ -43,7 +43,7 @@ In [claude.ai/code](https://claude.ai/code), open the settings of the environmen
 ```bash
 #!/bin/bash
 set -eu
-npm install -g claude-code-cloud-monitor
+npm install -g @tomoasleep/claude-code-cloud-monitor
 cccm plugin install
 ```
 
@@ -87,7 +87,7 @@ git clone --depth 1 https://github.com/tomoasleep/claude-code-cloud-monitor /tmp
 cd /tmp/cccm-src
 npm ci
 npm pack
-npm install -g ./claude-code-cloud-monitor-*.tgz
+npm install -g ./tomoasleep-claude-code-cloud-monitor-*.tgz
 cccm plugin install
 ```
 

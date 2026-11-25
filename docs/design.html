@@ -149,7 +149,7 @@ ol.flow > li { margin-bottom: 6px; }
 <h3>決定済み（tomoasleep、2026-11-25、チャットと Plannotator）</h3>
 <ul>
 <li>public の <code>tomoasleep/claude-code-cloud-monitor</code>。社内・私的な repo や組織の名前は入れない。</li>
-<li>TypeScript、実行時の依存なし、npm で配る（bin は <code>cccm</code>）。hook も Node。</li>
+<li>TypeScript、実行時の依存なし、npm で配る（bin は <code>cccm</code>）。hook も Node。<span class="tag chg">第 7 版で変更</span> npm の名前は scope 付きの <code>@tomoasleep/claude-code-cloud-monitor</code>（tomoasleep の決定、2026-11-25）。</li>
 <li>hook は Claude Code plugin として配り、<code>cccm plugin install</code> で導入する。<code>PostToolUse</code> は全ツールにはかけない。</li>
 <li>CLI は claude の CLI に寄せる（追加するオプション以外）。</li>
 <li>ack はエージェントに明示的に行わせる。ack が 5 分以内に来なければ失敗。<span class="tag chg">第 7 版で変更</span> hub の repo をセッションに紐づけるのはユーザーの責任で、cccm は推測して指示を足さない。</li>
@@ -370,7 +370,7 @@ cccm report hook     （hook から呼ぶ。標準入力の hook の JSON を読
 <p>README で案内する、クラウドの環境の setup script:</p>
 <pre><code>#!/bin/bash
 set -eu
-npm install -g claude-code-cloud-monitor
+npm install -g @tomoasleep/claude-code-cloud-monitor
 cccm plugin install</code></pre>
 <p><span class="tag verify">検証済み</span> 2026-11-25、実験用の環境の setup script を検証用に差し替え、dotfiles だけで起動したセッションで確かめた。</p>
 <div class="table-wrap"><table>
