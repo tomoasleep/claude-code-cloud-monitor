@@ -1,4 +1,5 @@
 import type { CommandRunner } from "./command.ts"
+import { sessionUrl } from "./state.ts"
 
 export async function runTokenCommand(
   command: string,
@@ -37,5 +38,6 @@ export async function fireRoutine(
       `routine fire failed: ${response.status} ${error?.type ?? ""}: ${error?.message ?? ""}`,
     )
   }
-  return { sessionId: body.claude_code_session_id, url: body.claude_code_session_url }
+  const sessionId = String(body.claude_code_session_id).replace(/^cse_/, "session_")
+  return { sessionId, url: sessionUrl(sessionId) }
 }

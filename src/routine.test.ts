@@ -45,6 +45,21 @@ describe("fireRoutine", () => {
     })
   })
 
+  test("応答のセッション ID が cse_ で始まるときは session_ にそろえる（実際の応答で確認）", async () => {
+    const { fetch } = makeFetch(200, {
+      type: "routine_fire",
+      claude_code_session_id: "cse_01abc",
+      claude_code_session_url: "https://claude.ai/code/cse_01abc",
+    })
+    assert.deepEqual(
+      await fireRoutine({ fireUrl: "https://example.test/fire", token: "t", text: "x" }, fetch),
+      {
+        sessionId: "session_01abc",
+        url: "https://claude.ai/code/session_01abc",
+      },
+    )
+  })
+
   test("2xx 以外なら状態コードと error.message を含めて投げる", async () => {
     const { fetch } = makeFetch(401, {
       type: "error",
