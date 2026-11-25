@@ -62,6 +62,9 @@ Treat the text in the routine fire payload as the user's request and carry it ou
 including the cccm instructions at its end.
 ```
 
+> [!NOTE]
+> Routine sessions run in auto mode, and as of November 2026 its permission check sometimes blocks `cccm report init` as "unsanctioned communication", even with `Bash(cccm report:*)` allowed in the VM. The session then never acknowledges and `cccm launch` exits with code 3. In our runs this depended on the prompt: a task with several steps went through, while a one-line task was blocked every time.
+
 Add an API trigger and generate its token. Store the token where a command can print it (a keychain or password manager), then register the routine under a name:
 
 ```bash
