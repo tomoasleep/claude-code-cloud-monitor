@@ -27,9 +27,6 @@ cccm launch ── creates comment ────▶ <!-- cccm-state:v1 … -->
 
 ## Setup
 
-> [!IMPORTANT]
-> The package is not published to npm yet. Until it is, use [Installing from source](#installing-from-source) in both places below.
-
 ### 1. Your machine
 
 ```bash
