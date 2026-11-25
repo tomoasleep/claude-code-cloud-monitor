@@ -23,12 +23,12 @@ export const runCommand: CommandRunner = (command, args, options = {}) =>
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     })
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
-    child.stdout.on("data", (chunk) => stdout.push(chunk))
-    child.stderr.on("data", (chunk) => stderr.push(chunk))
+    child.stdout?.on("data", (chunk) => stdout.push(chunk))
+    child.stderr?.on("data", (chunk) => stderr.push(chunk))
     child.on("error", reject)
     child.on("close", (code) =>
       resolve({
@@ -37,5 +37,5 @@ export const runCommand: CommandRunner = (command, args, options = {}) =>
         stderr: Buffer.concat(stderr).toString("utf8"),
       }),
     )
-    child.stdin.end(options.input ?? "")
+    child.stdin?.end(options.input)
   })

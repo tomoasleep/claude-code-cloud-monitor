@@ -55,7 +55,7 @@ describe("buildCloudCreateCommand", () => {
 })
 
 describe("parseCreateOutput", () => {
-  test("ANSI を含む作成の出力からセッション ID と URL を取る", () => {
+  test("名前付きで作成した実際の出力（ANSI 付き）から、セッション ID と URL を取る", () => {
     assert.deepEqual(parseCreateOutput(fixture("cloud-create-output.txt")), {
       sessionId: "session_01TestSessionId0000000000",
       url: "https://claude.ai/code/session_01TestSessionId0000000000",

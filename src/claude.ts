@@ -32,10 +32,12 @@ const ANSI_PATTERN = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g
 
 export function parseCreateOutput(output: string): { sessionId: string; url: string } | null {
   const text = output.replace(ANSI_PATTERN, "")
-  const sessionId = /Created cloud session:\s*(session_[A-Za-z0-9]+)/.exec(text)?.[1]
+  if (!text.includes("Created cloud session:")) return null
+  const sessionId =
+    /View:\s*https:\/\/\S*\/(session_[A-Za-z0-9]+)/.exec(text)?.[1] ??
+    /claude --teleport\s+(session_[A-Za-z0-9]+)/.exec(text)?.[1]
   if (!sessionId) return null
-  const url = /View:\s*(https:\/\/\S+)/.exec(text)?.[1] ?? `https://claude.ai/code/${sessionId}`
-  return { sessionId, url }
+  return { sessionId, url: `https://claude.ai/code/${sessionId}` }
 }
 
 export function buildReminderArgs(sessionId: string, text: string): string[] {

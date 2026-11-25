@@ -1,4 +1,4 @@
-[?25l[2K[1G[32m✓[39m Created cloud session: [1msession_01TestSessionId0000000000[22m
-  View: [4mhttps://claude.ai/code/session_01TestSessionId0000000000[24m
-  Resume with: claude --teleport session_01TestSessionId0000000000
-[?25h
+^D7[r8[?25hCreated cloud session: my task
+View: https://claude.ai/code/session_01TestSessionId0000000000?from=cli&m=0
+Resume with: claude --teleport session_01TestSessionId0000000000
+[?1006l[?1003l[?1002l[?1000l(B[?1016l[?1006l[?1003l[?1002l[?1000l[>4m[?1004l[?2031l[?2004l[?7h[<u[?25h7[r8
